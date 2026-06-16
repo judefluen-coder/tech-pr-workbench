@@ -42,7 +42,7 @@ brew install node uv ffmpeg
 ## 快速启动
 
 ```bash
-git clone https://github.com/YOUR_ACCOUNT/tech-pr-workbench.git
+git clone https://github.com/judefluen-coder/tech-pr-workbench.git
 cd tech-pr-workbench
 npm run setup
 npm run dev
