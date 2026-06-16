@@ -122,6 +122,8 @@ npm run doctor
 
 它会检查基础依赖，并提示哪些可选工具缺失以及影响。
 
+如果对方准备把 GitHub 链接丢给 Codex、Claude Code、Cursor 等本地 coding agent，让大模型帮忙安装，请看 [Setup With A Coding Agent](docs/AI_AGENT_SETUP.md)。里面有可直接复制的提示词，以及哪些依赖能自动装、哪些需要用户自己提供授权或 API key。
+
 ## 快速启动
 
 ```bash

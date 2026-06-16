@@ -94,6 +94,7 @@ function doctor({ strict = false } = {}) {
   console.log("- YouTube API key, because users must create their own key.");
   console.log("- OpenAI SDK, unless users explicitly install backend[cloud-ai].");
   console.log("- faster-whisper, unless users explicitly install backend[local-asr].");
+  console.log("- XiaDown, because it is an external companion downloader, not a built-in engine.");
   console.log("- Argos language model may download on first translation when ARGOS_AUTO_INSTALL=true.");
 }
 
