@@ -1,16 +1,29 @@
 # Tech PR Workbench
 
-Tech PR Workbench 是一个本地运行的 AI/科技采访日报与剪辑工作台，面向科技公司 PR、内容运营和创始人办公室。它每天帮你发现 AI 圈新采访，保留原始链接，识别采访嘉宾，生成中文摘要；当你选择某条视频后，可以下载授权素材、生成中文字幕、挑选高光片段，并导出带字幕的剪辑序列视频。
+Local-first AI interview discovery, Chinese subtitle translation, and authorized clip preparation for tech PR teams.
+
+Tech PR Workbench 帮科技公司 PR、内容运营和创始人办公室把公开视频采访变成可复核的日报和可剪辑素材：先发现 AI/科技采访，保留原始链接和嘉宾线索，再为授权视频生成中文字幕、推荐高光片段并导出剪辑序列。
 
 > 默认定位：个人或小团队本地工具。请只下载、剪辑和再发布你有权处理的素材。
 
-## 你可以用它做什么
+## Highlights
 
 - 按日期区间抓取 AI 采访候选：YouTube 优先，B 站补充。
-- 看每条视频的标题、来源、发布时间、人物识别、摘要和原始链接。
-- 点击“下载并翻译”后，自动尝试下载视频、拉取字幕、生成中文字幕。
-- 在剪辑工作台里看视频、读中文字幕、查看推荐高光、组合多段剪辑。
+- 汇总标题、来源、发布时间、人物识别、中文摘要和原始链接。
+- 下载授权素材后，自动拉取字幕、生成中文字幕，并给出高光建议。
 - 导出 VTT/SRT 字幕、剪辑表 CSV，以及带中文字幕的序列视频。
+
+## Quick Start
+
+```bash
+git clone https://github.com/judefluen-coder/tech-pr-workbench.git
+cd tech-pr-workbench
+npm run doctor
+npm run setup
+npm run dev
+```
+
+打开 `http://127.0.0.1:5173`。后端默认运行在 `http://127.0.0.1:8000`。
 
 ## 截图导览
 
@@ -124,7 +137,7 @@ npm run doctor
 
 如果对方准备把 GitHub 链接丢给 Codex、Claude Code、Cursor 等本地 coding agent，让大模型帮忙安装，请看 [Setup With A Coding Agent](docs/AI_AGENT_SETUP.md)。里面有可直接复制的提示词，以及哪些依赖能自动装、哪些需要用户自己提供授权或 API key。
 
-## 快速启动
+## 启动细节
 
 ```bash
 git clone https://github.com/judefluen-coder/tech-pr-workbench.git
