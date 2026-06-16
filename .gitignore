@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.npm-cache/
+node_modules/
+dist/
+*.tsbuildinfo
+storage/*.db
+storage/uploads/*
+storage/exports/*
+storage/tmp/*
+storage/downloads/*
+!storage/uploads/.gitkeep
+!storage/exports/.gitkeep
+!storage/tmp/.gitkeep
+!storage/downloads/.gitkeep
