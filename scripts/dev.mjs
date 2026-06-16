@@ -7,6 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = new Set(process.argv.slice(2));
 const installOnly = args.has("--install-only");
 const skipInstall = args.has("--skip-install");
+const checkOnly = args.has("--check-only");
 
 function command(name) {
   return process.platform === "win32" ? `${name}.cmd` : name;
@@ -20,12 +21,21 @@ function runChecked(label, cmd, cmdArgs) {
   }
 }
 
-function ensureCommand(label, cmd) {
-  const result = spawnSync(cmd, ["--version"], { cwd: root, stdio: "ignore" });
-  if (result.status !== 0) {
-    console.error(`Missing ${label}. Install it first, then rerun this command.`);
+function commandCheck(cmd, versionArgs = ["--version"]) {
+  const result = spawnSync(cmd, versionArgs, { cwd: root, encoding: "utf8" });
+  return {
+    ok: result.status === 0,
+    output: `${result.stdout || ""}${result.stderr || ""}`.trim().split("\n")[0] || "",
+  };
+}
+
+function requireCommand(label, cmd, installHint, versionArgs = ["--version"]) {
+  const result = commandCheck(cmd, versionArgs);
+  if (!result.ok) {
+    console.error(`Missing ${label}. ${installHint}`);
     process.exit(1);
   }
+  return result;
 }
 
 function ensureEnv() {
@@ -37,11 +47,54 @@ function ensureEnv() {
 }
 
 function install() {
-  ensureCommand("uv", "uv");
-  ensureCommand("npm", command("npm"));
+  doctor({ strict: true });
   ensureEnv();
   runChecked("backend", "uv", ["sync", "--project", "backend", "--extra", "local-translation", "--extra", "test"]);
   runChecked("frontend", command("npm"), ["install", "--prefix", "frontend"]);
+}
+
+function doctor({ strict = false } = {}) {
+  const required = [
+    ["Node.js", command("node"), "Install Node.js 20+ first. macOS: brew install node", ["--version"]],
+    ["npm", command("npm"), "Install npm with Node.js first.", ["--version"]],
+    ["uv", "uv", "Install uv first. macOS: brew install uv", ["--version"]],
+    ["FFmpeg", "ffmpeg", "Install FFmpeg first. macOS: brew install ffmpeg", ["-version"]],
+  ];
+  console.log("\nDependency check");
+  console.log("----------------");
+  for (const [label, cmd, hint, versionArgs] of required) {
+    const result = strict ? requireCommand(label, cmd, hint, versionArgs) : commandCheck(cmd, versionArgs);
+    console.log(`${result.ok ? "OK " : "NO "} ${label}${result.output ? ` - ${result.output}` : ""}`);
+    if (!result.ok) {
+      console.log(`    ${hint}`);
+    }
+  }
+
+  const optional = [
+    ["opencli", "opencli", "Optional fallback for YouTube search when no YouTube API key is configured."],
+    ["Ollama", "ollama", "Optional local LLM translation fallback."],
+  ];
+  console.log("\nOptional tools");
+  console.log("--------------");
+  for (const [label, cmd, note] of optional) {
+    const result = commandCheck(cmd);
+    console.log(`${result.ok ? "OK " : "-- "} ${label}${result.output ? ` - ${result.output}` : ""}`);
+    if (!result.ok) {
+      console.log(`    ${note}`);
+    }
+  }
+
+  console.log("\nInstalled by npm run setup");
+  console.log("--------------------------");
+  console.log("- Backend Python packages, including yt-dlp and Argos Translate.");
+  console.log("- Frontend npm packages.");
+  console.log("- .env copied from .env.example when missing.");
+  console.log("\nNot installed automatically");
+  console.log("---------------------------");
+  console.log("- YouTube API key, because users must create their own key.");
+  console.log("- OpenAI SDK, unless users explicitly install backend[cloud-ai].");
+  console.log("- faster-whisper, unless users explicitly install backend[local-asr].");
+  console.log("- Argos language model may download on first translation when ARGOS_AUTO_INSTALL=true.");
 }
 
 function startProcess(label, cmd, cmdArgs) {
@@ -65,6 +118,11 @@ function shutdown(code = 0) {
     child.kill("SIGTERM");
   }
   setTimeout(() => process.exit(code), 300).unref();
+}
+
+if (checkOnly) {
+  doctor();
+  process.exit(0);
 }
 
 if (!skipInstall) {
