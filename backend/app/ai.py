@@ -142,7 +142,10 @@ def _parse_timestamp(value: str) -> float:
 
 
 def _transcribe_with_openai(audio_path: Path) -> list[dict]:
-    from openai import OpenAI
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError("CLOUD_AI_ENABLED=true 但未安装 OpenAI SDK。请运行：uv sync --project backend --extra cloud-ai") from exc
 
     client = OpenAI(api_key=settings.openai_api_key)
     with audio_path.open("rb") as audio:
@@ -312,7 +315,10 @@ def _translate_with_ollama(segments: list[dict]) -> list[dict]:
 
 
 def _translate_with_openai(segments: list[dict]) -> list[dict]:
-    from openai import OpenAI
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError("CLOUD_AI_ENABLED=true 但未安装 OpenAI SDK。请运行：uv sync --project backend --extra cloud-ai") from exc
 
     client = OpenAI(api_key=settings.openai_api_key)
     numbered = "\n".join(f"{idx}. {segment['text']}" for idx, segment in enumerate(segments, start=1))

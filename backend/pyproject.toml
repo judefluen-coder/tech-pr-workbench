@@ -7,7 +7,6 @@ dependencies = [
     "apscheduler>=3.10.4",
     "fastapi>=0.116.1",
     "httpx>=0.28.1",
-    "openai>=2.0.0",
     "pillow>=11.0.0",
     "pydantic>=2.10.6",
     "python-dotenv>=1.0.1",
@@ -17,6 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cloud-ai = ["openai>=2.0.0"]
 local-asr = ["faster-whisper>=1.1.0"]
 local-translation = ["argos-translate-lt>=1.12.1"]
 test = ["pytest>=8.3.4"]

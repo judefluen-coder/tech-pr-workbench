@@ -831,7 +831,6 @@ dependencies = [
     { name = "apscheduler" },
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "openai" },
     { name = "pillow" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -841,6 +840,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+cloud-ai = [
+    { name = "openai" },
+]
 local-asr = [
     { name = "faster-whisper" },
 ]
@@ -858,7 +860,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.116.1" },
     { name = "faster-whisper", marker = "extra == 'local-asr'", specifier = ">=1.1.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "openai", specifier = ">=2.0.0" },
+    { name = "openai", marker = "extra == 'cloud-ai'", specifier = ">=2.0.0" },
     { name = "pillow", specifier = ">=11.0.0" },
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.4" },
@@ -867,7 +869,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.1" },
     { name = "yt-dlp", specifier = ">=2026.1.1" },
 ]
-provides-extras = ["local-asr", "local-translation", "test"]
+provides-extras = ["cloud-ai", "local-asr", "local-translation", "test"]
 
 [[package]]
 name = "tokenizers"

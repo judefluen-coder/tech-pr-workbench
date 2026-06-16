@@ -11,7 +11,7 @@
 - 人物识别：区分“追踪人物命中”和“识别出的采访嘉宾”。
 - 一键处理：优先使用原中文字幕，其次英文字幕本地翻译，再其次本地转写。
 - 剪辑工作台：播放器、中文字幕、时间轴高光建议、多段剪辑序列、导出 VTT/SRT/剪辑表/序列视频。
-- 本地优先：SQLite、yt-dlp、FFmpeg、Argos Translate，可选 faster-whisper/Ollama/OpenAI。
+- 本地优先：SQLite、yt-dlp、FFmpeg、Argos Translate，可选 faster-whisper/Ollama。
 
 ## 是否涉及收费
 
@@ -19,7 +19,7 @@
 
 - `yt-dlp`、FFmpeg、SQLite、Argos Translate、本地 Ollama 都是本机工具或开源软件，本项目不会向它们按量付费。
 - YouTube Data API 用于发现公开视频元数据，主要受每日 quota 限制；默认配额可能不够大规模生产使用。
-- OpenAI API 是可选项。只有当你在 `.env` 里设置 `CLOUD_AI_ENABLED=true` 并提供 `OPENAI_API_KEY` 时，才会调用云端付费模型。
+- OpenAI API 不参与默认流程，也不会默认安装 SDK。只有当你额外安装 `backend[cloud-ai]`、设置 `CLOUD_AI_ENABLED=true` 并提供 `OPENAI_API_KEY` 时，才会调用云端付费模型。
 - GitHub 公共仓库可免费托管代码；如果你启用额外的私有团队、Actions 大量 CI、Packages 等能力，可能会进入 GitHub 自身的计费范围。
 
 ## 平台支持
@@ -71,8 +71,6 @@ http://127.0.0.1:5173
 
 ```env
 YOUTUBE_API_KEY=
-CLOUD_AI_ENABLED=false
-OPENAI_API_KEY=
 ARGOS_TRANSLATE_ENABLED=true
 LOCAL_ASR_ENABLED=false
 DOWNLOAD_ENGINE=yt-dlp
@@ -82,6 +80,19 @@ BILIBILI_DISCOVERY_ENABLED=true
 ```
 
 推荐第一步先不配置 OpenAI。需要更稳定的 YouTube 发现结果时，再配置 `YOUTUBE_API_KEY`。
+
+如果确实需要 OpenAI 作为云端转写/翻译兜底：
+
+```bash
+uv sync --project backend --extra cloud-ai
+```
+
+然后在 `.env` 中设置：
+
+```env
+CLOUD_AI_ENABLED=true
+OPENAI_API_KEY=你的 key
+```
 
 ## 下载与字幕策略
 
