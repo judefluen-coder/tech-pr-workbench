@@ -8,6 +8,7 @@ from app.config import settings
 from app.bilibili import sync_bilibili
 from app.db import get_connection, now_iso, row_to_dict
 from app.summaries import build_discovery_summary
+from app.templates import DEFAULT_TEMPLATE_SLUG, get_template_from_conn
 from app.youtube import sync_youtube
 
 
@@ -44,17 +45,34 @@ def _beijing_day_start_utc(target: date) -> str:
     return start_local.astimezone(timezone.utc).replace(microsecond=0).isoformat()
 
 
-async def run_daily_discovery(day: str | None = None, limit_per_query: int = 5, start_date: str | None = None, end_date: str | None = None) -> dict:
+async def run_daily_discovery(
+    day: str | None = None,
+    limit_per_query: int = 5,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    template_slug: str = DEFAULT_TEMPLATE_SLUG,
+) -> dict:
     range_start, range_end, window_start, window_end = beijing_range_window(start_date or day, end_date or day)
     timestamp = now_iso()
     with get_connection() as conn:
+        template = get_template_from_conn(conn, template_slug)
         cursor = conn.execute(
             """
             INSERT INTO jobs (type, status, message, payload, created_at, updated_at)
-            VALUES ('daily_discovery', 'running', '正在抓取区间 AI 采访', ?, ?, ?)
+            VALUES ('daily_discovery', 'running', ?, ?, ?, ?)
             """,
             (
-                json.dumps({"start_date": range_start, "end_date": range_end, "window_start": window_start, "window_end": window_end}, ensure_ascii=False),
+                f"正在抓取区间{template['name']}",
+                json.dumps(
+                    {
+                        "template_slug": template["slug"],
+                        "start_date": range_start,
+                        "end_date": range_end,
+                        "window_start": window_start,
+                        "window_end": window_end,
+                    },
+                    ensure_ascii=False,
+                ),
                 timestamp,
                 timestamp,
             ),
@@ -71,6 +89,7 @@ async def run_daily_discovery(day: str | None = None, limit_per_query: int = 5, 
             include_demo_when_unconfigured=False,
             published_after=window_start,
             published_before=window_end,
+            template_slug=template["slug"],
         )
     except Exception as exc:
         failures["youtube"] = str(exc)
@@ -80,6 +99,7 @@ async def run_daily_discovery(day: str | None = None, limit_per_query: int = 5, 
             limit_per_query=limit_per_query,
             published_after=window_start,
             published_before=window_end,
+            template_slug=template["slug"],
         )
     except Exception as exc:
         failures["bilibili"] = str(exc)
@@ -90,9 +110,9 @@ async def run_daily_discovery(day: str | None = None, limit_per_query: int = 5, 
     if status == "failed":
         message = "、".join(f"{name}: {error}" for name, error in failures.items())
     elif failures:
-        message = f"日报抓取完成，新增/更新 {inserted} 条；部分来源失败。"
+        message = f"{template['name']}抓取完成，新增/更新 {inserted} 条；部分来源失败。"
     else:
-        message = f"日报抓取完成，新增/更新 {inserted} 条。"
+        message = f"{template['name']}抓取完成，新增/更新 {inserted} 条。"
 
     with get_connection() as conn:
         conn.execute(
@@ -100,33 +120,46 @@ async def run_daily_discovery(day: str | None = None, limit_per_query: int = 5, 
             (
                 status,
                 message,
-                json.dumps({"start_date": range_start, "end_date": range_end, "result": result}, ensure_ascii=False),
+                json.dumps({"template_slug": template["slug"], "start_date": range_start, "end_date": range_end, "result": result}, ensure_ascii=False),
                 now_iso(),
                 job_id,
             ),
         )
 
-    daily = get_daily_report(range_start, range_end)
+    daily = get_daily_report(range_start, range_end, template["slug"])
     daily["job_id"] = job_id
     daily["run_result"] = result
     return daily
 
 
-def get_daily_report(day: str | None = None, end_date: str | None = None) -> dict:
+def get_daily_report(day: str | None = None, end_date: str | None = None, template_slug: str = DEFAULT_TEMPLATE_SLUG) -> dict:
     range_start, range_end, window_start, window_end = beijing_range_window(day, end_date or day)
     with get_connection() as conn:
+        template = get_template_from_conn(conn, template_slug)
         rows = [
             row_to_dict(row)
             for row in conn.execute(
                 """
-                SELECT * FROM videos
+                SELECT DISTINCT videos.* FROM videos
+                LEFT JOIN video_template_links
+                  ON video_template_links.video_id = videos.id
+                WHERE videos.template_slug = ? OR video_template_links.template_slug = ?
                 ORDER BY priority_score DESC, published_at DESC, created_at DESC, id DESC
-                """
+                """,
+                (template["slug"], template["slug"]),
             ).fetchall()
         ]
-        latest_job = conn.execute("SELECT * FROM jobs WHERE type IN ('daily_discovery', 'download_translate') ORDER BY id DESC LIMIT 1").fetchone()
+        latest_job = conn.execute(
+            """
+            SELECT * FROM jobs
+            WHERE type IN ('daily_discovery', 'download_translate')
+              AND (payload LIKE ? OR type = 'download_translate')
+            ORDER BY id DESC LIMIT 1
+            """,
+            (f'%"template_slug": "{template["slug"]}"%',),
+        ).fetchone()
     items = [
-        _with_decision_summary(row)
+        _with_decision_summary(row, template)
         for row in rows
         if _row_matches_beijing_range(row, range_start, range_end) and _is_real_video_row(row)
     ]
@@ -134,6 +167,8 @@ def get_daily_report(day: str | None = None, end_date: str | None = None) -> dic
         "date": range_start,
         "start_date": range_start,
         "end_date": range_end,
+        "template_slug": template["slug"],
+        "template": template,
         "timezone": "Asia/Shanghai",
         "window_start": window_start,
         "window_end": window_end,
@@ -162,13 +197,14 @@ def _is_real_video_row(row: dict) -> bool:
     return bool(url)
 
 
-def _with_decision_summary(row: dict) -> dict:
+def _with_decision_summary(row: dict, template: dict) -> dict:
     item = dict(row)
     item["summary"] = build_discovery_summary(
         item.get("title", ""),
         item.get("description", ""),
         item.get("channel_title", ""),
         item.get("matched_people", "") or item.get("candidate_people", ""),
+        template,
     )
     return item
 

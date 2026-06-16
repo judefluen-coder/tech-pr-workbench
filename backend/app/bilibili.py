@@ -12,8 +12,9 @@ import httpx
 
 from app.config import settings
 from app.db import get_connection, now_iso, row_to_dict
-from app.scoring import interview_confidence, people_signals_for_video, priority_score
-from app.summaries import build_discovery_summary, looks_ai_related
+from app.scoring import people_signals_for_video, priority_score, topic_confidence
+from app.summaries import build_discovery_summary, looks_related_to_template
+from app.templates import DEFAULT_TEMPLATE_SLUG, get_template_from_conn
 
 
 BILIBILI_SEARCH_QUERIES = [
@@ -32,7 +33,12 @@ MEDIA_SUFFIXES = {".mp4", ".m4a", ".mp3", ".mov", ".webm", ".mkv", ".flv"}
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 
 
-def sync_bilibili(limit_per_query: int = 5, published_after: str | None = None, published_before: str | None = None) -> dict:
+def sync_bilibili(
+    limit_per_query: int = 5,
+    published_after: str | None = None,
+    published_before: str | None = None,
+    template_slug: str = DEFAULT_TEMPLATE_SLUG,
+) -> dict:
     if not settings.bilibili_discovery_enabled or not settings.opencli_discovery_enabled:
         return {"mode": "disabled", "queried": 0, "candidates": 0, "inserted": 0, "message": "B站抓取已关闭。"}
 
@@ -44,6 +50,8 @@ def sync_bilibili(limit_per_query: int = 5, published_after: str | None = None, 
     errors: list[str] = []
     queried = 0
     channel_limit = settings.bilibili_channel_scan_limit
+    with get_connection() as conn:
+        template = get_template_from_conn(conn, template_slug)
     for uid in settings.bilibili_channel_uids[:channel_limit]:
         queried += 1
         try:
@@ -51,7 +59,8 @@ def sync_bilibili(limit_per_query: int = 5, published_after: str | None = None, 
         except Exception as exc:
             errors.append(f"账号 {uid} 抓取失败：{exc}")
 
-    for query in BILIBILI_SEARCH_QUERIES[: max(3, min(len(BILIBILI_SEARCH_QUERIES), limit_per_query))]:
+    queries = template.get("bilibili_queries") or BILIBILI_SEARCH_QUERIES
+    for query in queries[: max(3, min(len(queries), limit_per_query))]:
         queried += 1
         try:
             raw_items.extend(_run_opencli_search(opencli, query, max(limit_per_query, 5)))
@@ -69,7 +78,7 @@ def sync_bilibili(limit_per_query: int = 5, published_after: str | None = None, 
         if metadata:
             enriched.append(metadata)
 
-    inserted = _upsert_bilibili_items(enriched, published_after, published_before)
+    inserted = _upsert_bilibili_items(enriched, published_after, published_before, template["slug"])
     message = "已同步 B站候选，并按真实发布时间过滤。"
     if errors:
         message += f" 部分来源失败 {len(errors)} 个。"
@@ -254,36 +263,43 @@ def _metadata_from_opencli_item(bvid: str, item: dict) -> dict | None:
     }
 
 
-def _upsert_bilibili_items(items: list[dict], published_after: str | None, published_before: str | None) -> int:
+def _upsert_bilibili_items(
+    items: list[dict],
+    published_after: str | None,
+    published_before: str | None,
+    template_slug: str = DEFAULT_TEMPLATE_SLUG,
+) -> int:
     if not items:
         return 0
     with get_connection() as conn:
-        people = [dict(row) for row in conn.execute("SELECT * FROM people").fetchall()]
+        template = get_template_from_conn(conn, template_slug)
+        people = [dict(row) for row in conn.execute("SELECT * FROM people WHERE template_slug = ?", (template["slug"],)).fetchall()]
         inserted_or_updated = 0
         for item in items:
             title = item.get("title", "")
             description = item.get("description", "") or ""
             channel = item.get("channel_title") or ""
-            if not looks_ai_related(title, description, channel):
+            if not looks_related_to_template(title, description, channel, template):
                 continue
             published_at = item.get("published_at", "")
             if not published_at or not _within_utc_window(published_at, published_after, published_before):
                 continue
             matches, names, candidate_people, reason = people_signals_for_video(title, description, channel, people)
-            confidence = interview_confidence(title, description, int(item.get("duration_seconds") or 0))
+            confidence = topic_confidence(title, description, int(item.get("duration_seconds") or 0), template.get("scoring_terms") or None)
             view_count = int(item.get("view_count") or 0)
             score = priority_score(matches, confidence, published_at, channel, view_count)
-            summary = build_discovery_summary(title, description, channel, names or candidate_people)
+            summary = build_discovery_summary(title, description, channel, names or candidate_people, template)
             timestamp = now_iso()
             cursor = conn.execute(
                 """
                 INSERT INTO videos (
-                  platform, external_id, url, title, description, channel_title, published_at,
+                  template_slug, platform, external_id, url, title, description, channel_title, published_at,
                   duration_seconds, view_count, like_count, thumbnail_url, matched_people,
                   candidate_people, people_match_reason, interview_confidence, priority_score, status, compliance_note, summary, source_tier, created_at, updated_at
                 )
-                VALUES ('bilibili', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 'metadata_only', ?, 'stable', ?, ?)
+                VALUES (?, 'bilibili', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 'metadata_only', ?, 'stable', ?, ?)
                 ON CONFLICT(platform, external_id) DO UPDATE SET
+                  template_slug = excluded.template_slug,
                   url = excluded.url,
                   title = excluded.title,
                   description = excluded.description,
@@ -303,6 +319,7 @@ def _upsert_bilibili_items(items: list[dict], published_after: str | None, publi
                   updated_at = excluded.updated_at
                 """,
                 (
+                    template["slug"],
                     str(item["external_id"]),
                     item["url"],
                     title,
@@ -323,6 +340,12 @@ def _upsert_bilibili_items(items: list[dict], published_after: str | None, publi
                     timestamp,
                 ),
             )
+            video_row = conn.execute("SELECT id FROM videos WHERE platform = 'bilibili' AND external_id = ?", (str(item["external_id"]),)).fetchone()
+            if video_row:
+                conn.execute(
+                    "INSERT OR IGNORE INTO video_template_links (video_id, template_slug, created_at) VALUES (?, ?, ?)",
+                    (video_row["id"], template["slug"], now_iso()),
+                )
             inserted_or_updated += max(cursor.rowcount, 0)
         return inserted_or_updated
 

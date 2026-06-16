@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class PersonCreate(BaseModel):
+    template_slug: str = "ai-interviews"
     name: str
     english_name: str = ""
     aliases: str = ""
@@ -29,13 +30,38 @@ class YoutubeSyncRequest(BaseModel):
     days_back: int = Field(default=1, ge=1, le=30)
     limit_per_query: int = Field(default=8, ge=1, le=25)
     include_demo_when_unconfigured: bool = True
+    template_slug: str = "ai-interviews"
 
 
 class DailyRunRequest(BaseModel):
     date: str | None = None
     start_date: str | None = None
     end_date: str | None = None
+    template_slug: str = "ai-interviews"
     limit_per_query: int = Field(default=5, ge=1, le=12)
+
+
+class TemplateCloneRequest(BaseModel):
+    name: str = ""
+    slug: str = ""
+
+
+class TemplateUpdateRequest(BaseModel):
+    name: str | None = None
+    page_title: str | None = None
+    description: str | None = None
+    list_title: str | None = None
+    run_button_label: str | None = None
+    empty_title: str | None = None
+    empty_description: str | None = None
+    search_placeholder: str | None = None
+    summary_focus: str | None = None
+    compliance_note: str | None = None
+    youtube_queries: list[str] | None = None
+    bilibili_queries: list[str] | None = None
+    topic_terms: list[str] | None = None
+    scoring_terms: dict[str, float] | None = None
+    highlight_terms: list[str] | None = None
 
 
 class DownloadRequest(BaseModel):
