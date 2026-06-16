@@ -58,6 +58,10 @@ class Settings:
         return os.getenv("DOWNLOAD_ENGINE", "yt-dlp")
 
     @property
+    def ytdlp_path(self) -> str:
+        return os.getenv("YTDLP_PATH", "yt-dlp")
+
+    @property
     def local_ytdlp_discovery(self) -> bool:
         return _as_bool(os.getenv("LOCAL_YTDLP_DISCOVERY"), True)
 
@@ -68,6 +72,19 @@ class Settings:
     @property
     def opencli_path(self) -> str:
         return os.getenv("OPENCLI_PATH", "opencli")
+
+    @property
+    def opencli_window_mode(self) -> str:
+        raw = os.getenv("OPENCLI_WINDOW_MODE", "foreground").strip().lower()
+        if raw in {"", "0", "false", "none", "off"}:
+            return ""
+        if raw in {"foreground", "background"}:
+            return raw
+        return "foreground"
+
+    @property
+    def opencli_preflight_enabled(self) -> bool:
+        return _as_bool(os.getenv("OPENCLI_PREFLIGHT_ENABLED"), True)
 
     @property
     def bilibili_discovery_enabled(self) -> bool:

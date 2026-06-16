@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from app.config import settings
 from app.db import get_connection, now_iso
+from app.opencli_runtime import opencli_window_args, prepare_opencli_browser
 from app.scoring import (
     interview_confidence,
     parse_youtube_duration,
@@ -333,8 +334,19 @@ def _query_date_bounds(published_after: str | None, published_before: str | None
 
 
 def _run_opencli_youtube_search(opencli: str, query: str, limit: int) -> list[dict]:
+    prepare_opencli_browser(opencli, "https://www.youtube.com")
     completed = subprocess.run(
-        [opencli, "youtube", "search", query, "--limit", str(min(limit, 12)), "--format", "json"],
+        [
+            opencli,
+            "youtube",
+            "search",
+            query,
+            "--limit",
+            str(min(limit, 12)),
+            "--format",
+            "json",
+            *_opencli_window_args(),
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -354,15 +366,33 @@ def _strip_opencli_update_notice(output: str) -> str:
     return text
 
 
+def _opencli_window_args() -> list[str]:
+    return opencli_window_args()
+
+
 def _metadata_from_ytdlp_url(url: str) -> dict | None:
     try:
-        from yt_dlp import YoutubeDL
-
-        with YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True, "socket_timeout": 20}) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception:
+        completed = subprocess.run(
+            [
+                *_ytdlp_command(),
+                "--ignore-config",
+                "--dump-single-json",
+                "--skip-download",
+                "--no-playlist",
+                "--no-warnings",
+                "--extractor-args",
+                "youtube:player_client=web",
+                url,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        info = json.loads(completed.stdout)
+    except (json.JSONDecodeError, subprocess.SubprocessError, OSError):
         return None
-    if not info:
+    if not info or not info.get("id"):
         return None
     return {
         "id": info.get("id"),
@@ -382,10 +412,10 @@ def _metadata_from_ytdlp_url(url: str) -> dict | None:
 def _run_ytdlp_search(query: str, limit: int) -> list[dict]:
     completed = subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "yt_dlp",
+            *_ytdlp_command(),
+            "--ignore-config",
             "--dump-json",
+            "--no-warnings",
             "--playlist-end",
             str(limit),
             f"ytsearch{limit}:{query}",
@@ -405,6 +435,16 @@ def _run_ytdlp_search(query: str, limit: int) -> list[dict]:
         except json.JSONDecodeError:
             continue
     return entries
+
+
+def _ytdlp_command() -> list[str]:
+    configured = settings.ytdlp_path.strip()
+    if configured:
+        resolved = shutil.which(configured)
+        if resolved:
+            return [resolved]
+        return [configured]
+    return [sys.executable, "-m", "yt_dlp"]
 
 
 def _upsert_ytdlp_items(items: list[dict], published_after: str | None = None, published_before: str | None = None) -> int:
