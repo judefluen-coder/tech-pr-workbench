@@ -1,4 +1,4 @@
-import type { AutomationResult, ClipMark, ClipPayload, ClipRenderResult, DailyReport, DashboardData, Job, Person, SystemStatus, TopicTemplate, Video, VideoDetail, VideoStatus } from "../types";
+import type { AutomationResult, ClipMark, ClipPayload, ClipRenderResult, DailyReport, DashboardData, Job, Person, SystemStatus, Video, VideoDetail, VideoStatus } from "../types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -13,28 +13,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  daily: (params: { date?: string; start_date?: string; end_date?: string; template_slug?: string } = {}) => {
+  daily: (params: { date?: string; start_date?: string; end_date?: string } = {}) => {
     const search = new URLSearchParams();
     if (params.date) search.set("date", params.date);
     if (params.start_date) search.set("start_date", params.start_date);
     if (params.end_date) search.set("end_date", params.end_date);
-    if (params.template_slug) search.set("template_slug", params.template_slug);
     const query = search.toString();
     return request<DailyReport>(`/api/daily${query ? `?${query}` : ""}`);
   },
-  templates: () => request<TopicTemplate[]>("/api/templates"),
-  cloneTemplate: (slug: string, payload: { name?: string; slug?: string } = {}) =>
-    request<TopicTemplate>(`/api/templates/${slug}/clone`, { method: "POST", body: JSON.stringify(payload) }),
-  updateTemplate: (slug: string, payload: Partial<TopicTemplate>) =>
-    request<TopicTemplate>(`/api/templates/${slug}`, { method: "PATCH", body: JSON.stringify(payload) }),
-  runDaily: (payload: { date?: string; start_date?: string; end_date?: string; template_slug?: string; limit_per_query?: number } = {}) =>
+  runDaily: (payload: { date?: string; start_date?: string; end_date?: string; limit_per_query?: number } = {}) =>
     request<DailyReport>("/api/daily/run", { method: "POST", body: JSON.stringify(payload) }),
   job: (id: number) => request<Job>(`/api/jobs/${id}`),
   dashboard: () => request<DashboardData>("/api/dashboard"),
   systemStatus: () => request<SystemStatus>("/api/system/status"),
   runAutomation: (payload: { days_back: number; limit_per_query: number; shortlist_threshold: number; auto_download: boolean; authorization_note: string; auto_transcribe: boolean }) =>
     request<AutomationResult>("/api/automation/run", { method: "POST", body: JSON.stringify(payload) }),
-  people: (templateSlug = "ai-interviews") => request<Person[]>(`/api/people?template_slug=${encodeURIComponent(templateSlug)}`),
+  people: () => request<Person[]>("/api/people"),
   addPerson: (payload: Partial<Person>) => request<Person>("/api/people", { method: "POST", body: JSON.stringify(payload) }),
   videos: (params: { status?: VideoStatus | "all"; search?: string } = {}) => {
     const search = new URLSearchParams();

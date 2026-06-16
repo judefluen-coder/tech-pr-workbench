@@ -22,11 +22,10 @@ import {
 } from "@phosphor-icons/react";
 import { api } from "./lib/api";
 import { formatDate, formatDuration, formatNumber, formatTimecode, statusLabel } from "./lib/format";
-import type { ClipMark, ClipPayload, ClipRenderResult, DailyReport, Job, SourceRun, TopicTemplate, Transcript, Video } from "./types";
+import type { ClipMark, ClipPayload, ClipRenderResult, DailyReport, Job, SourceRun, Transcript, Video } from "./types";
 
 const PROCESSING_STATUSES = new Set(["queued", "running"]);
 const VIDEO_PROCESSING_STATUSES = new Set(["downloading", "subtitle_fetching", "transcribing", "translating"]);
-const DEFAULT_TEMPLATE_SLUG = "ai-interviews";
 
 type TranscriptRow = ReturnType<typeof buildTranscriptRows>[number];
 
@@ -44,8 +43,6 @@ function App() {
   const defaultRange = useMemo(() => defaultBeijingRange(), []);
   const [startDate, setStartDate] = useState(defaultRange.start);
   const [endDate, setEndDate] = useState(defaultRange.end);
-  const [templates, setTemplates] = useState<TopicTemplate[]>([]);
-  const [templateSlug, setTemplateSlug] = useState(() => window.localStorage.getItem("tech-pr-template") || DEFAULT_TEMPLATE_SLUG);
   const [report, setReport] = useState<DailyReport | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [clip, setClip] = useState<ClipPayload | null>(null);
@@ -56,12 +53,10 @@ function App() {
   const [runningDaily, setRunningDaily] = useState(false);
   const [toast, setToast] = useState("");
 
-  const activeTemplate = templates.find((template) => template.slug === templateSlug) ?? report?.template ?? fallbackTemplate();
-
-  const loadDaily = async (range = { start: startDate, end: endDate, template: templateSlug }) => {
+  const loadDaily = async (range = { start: startDate, end: endDate }) => {
     setLoading(true);
     try {
-      const next = await api.daily({ start_date: range.start, end_date: range.end, template_slug: range.template });
+      const next = await api.daily({ start_date: range.start, end_date: range.end });
       setReport(next);
       const selectedStillVisible = next.items.some((item) => item.id === selectedId);
       if (!selectedStillVisible) setSelectedId(next.items[0]?.id ?? null);
@@ -73,20 +68,8 @@ function App() {
   };
 
   useEffect(() => {
-    api.templates()
-      .then((items) => {
-        setTemplates(items);
-        if (items.length && !items.some((template) => template.slug === templateSlug)) {
-          setTemplateSlug(DEFAULT_TEMPLATE_SLUG);
-        }
-      })
-      .catch((error) => setToast(readError(error, "模板加载失败")));
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem("tech-pr-template", templateSlug);
-    loadDaily({ start: startDate, end: endDate, template: templateSlug });
-  }, [startDate, endDate, templateSlug]);
+    loadDaily({ start: startDate, end: endDate });
+  }, [startDate, endDate]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -121,14 +104,14 @@ function App() {
           completedVideos.forEach((videoId) => delete next[videoId]);
           return next;
         });
-        await loadDaily({ start: startDate, end: endDate, template: templateSlug });
+        await loadDaily({ start: startDate, end: endDate });
         if (selectedId) {
           api.clipPayload(selectedId).then(setClip).catch(() => undefined);
         }
       }
     }, 2200);
     return () => window.clearInterval(timer);
-  }, [jobIdsByVideo, startDate, endDate, templateSlug, selectedId]);
+  }, [jobIdsByVideo, startDate, endDate, selectedId]);
 
   const filteredItems = useMemo(() => {
     const items = report?.items ?? [];
@@ -149,9 +132,9 @@ function App() {
     }
     setRunningDaily(true);
     try {
-      const next = await api.runDaily({ start_date: startDate, end_date: endDate, template_slug: activeTemplate.slug, limit_per_query: 3 });
+      const next = await api.runDaily({ start_date: startDate, end_date: endDate, limit_per_query: 3 });
       setReport(next);
-      setToast(`${activeTemplate.name}抓取完成。`);
+      setToast("区间 AI 采访抓取完成。");
       if (next.items[0]) setSelectedId(next.items[0].id);
     } catch (error) {
       setToast(readError(error, "抓取失败"));
@@ -204,37 +187,11 @@ function App() {
             <GlobeHemisphereEast size={24} weight="duotone" />
           </div>
           <div>
-            <h1>{activeTemplate.page_title}</h1>
-            <p>{activeTemplate.description}</p>
+            <h1>AI 采访日报</h1>
+            <p>按指定日期区间抓取新增采访，保留原链，一键下载翻译后进入剪辑。</p>
           </div>
         </div>
         <div className="header-actions">
-          <label className="template-control">
-            <span>主题</span>
-            <select value={activeTemplate.slug} onChange={(event) => setTemplateSlug(event.target.value)}>
-              {templates.map((template) => (
-                <option key={template.slug} value={template.slug}>
-                  {template.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <TemplateSettings
-            activeTemplate={activeTemplate}
-            onClone={async () => {
-              const cloned = await api.cloneTemplate(activeTemplate.slug, { name: `${activeTemplate.name} 自定义` });
-              setTemplates((current) => [...current.filter((item) => item.slug !== cloned.slug), cloned]);
-              setTemplateSlug(cloned.slug);
-              setToast("已复制为自定义模板，可以编辑关键词。");
-            }}
-            onSave={async (updates) => {
-              const saved = await api.updateTemplate(activeTemplate.slug, updates);
-              setTemplates((current) => current.map((item) => (item.slug === saved.slug ? saved : item)));
-              setReport((current) => (current && current.template_slug === saved.slug ? { ...current, template: saved } : current));
-              setToast("模板设置已保存。");
-            }}
-            onError={setToast}
-          />
           <label className="date-control">
             <CalendarBlank size={17} />
             <span>开始</span>
@@ -247,13 +204,13 @@ function App() {
           </label>
           <button className="primary" onClick={runDaily} disabled={runningDaily}>
             {runningDaily ? <SpinnerGap size={17} className="spin" /> : <DownloadSimple size={17} />}
-            {runningDaily ? "抓取中" : activeTemplate.run_button_label}
+            {runningDaily ? "抓取中" : "抓取区间 AI 采访"}
           </button>
         </div>
       </header>
 
       <section className="summary-strip">
-        <Metric label="候选视频" value={stats.total} detail="按北京时间区间" />
+        <Metric label="候选采访" value={stats.total} detail="按北京时间区间" />
         <Metric label="可处理" value={stats.ready} detail="可下载翻译" />
         <Metric label="处理中" value={stats.processing} detail="下载/字幕/转写" />
         <Metric label="可剪辑" value={stats.clipReady} detail="已带中文字幕" />
@@ -269,12 +226,12 @@ function App() {
         <div className="daily-panel">
           <div className="panel-toolbar">
             <div>
-              <h2>{startDate === endDate ? startDate : `${startDate} 至 ${endDate}`} {activeTemplate.list_title}</h2>
+              <h2>{startDate === endDate ? startDate : `${startDate} 至 ${endDate}`} AI 采访列表</h2>
               <p>{report ? `北京时间窗口：${formatDate(report.window_start)} - ${formatDate(report.window_end)}` : "正在准备日报"}</p>
             </div>
             <label className="search-control">
               <MagnifyingGlass size={17} />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={activeTemplate.search_placeholder} />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜人物、标题、频道" />
             </label>
           </div>
           {loading ? (
@@ -290,7 +247,7 @@ function App() {
               onDownloadTranslate={startDownloadTranslate}
             />
           ) : (
-            <EmptyState onRun={runDaily} running={runningDaily} template={activeTemplate} />
+            <EmptyState onRun={runDaily} running={runningDaily} />
           )}
         </div>
 
@@ -303,7 +260,6 @@ function App() {
         clip={clip}
         selectedVideo={selectedVideo}
         processing={selectedProcessing}
-        template={activeTemplate}
         onDownloadTranslate={startDownloadTranslate}
         onRefresh={() => selectedId && api.clipPayload(selectedId).then(setClip)}
         onToast={setToast}
@@ -315,142 +271,6 @@ function App() {
         </button>
       )}
     </main>
-  );
-}
-
-function TemplateSettings({
-  activeTemplate,
-  onClone,
-  onSave,
-  onError,
-}: {
-  activeTemplate: TopicTemplate;
-  onClone: () => Promise<void>;
-  onSave: (updates: Partial<TopicTemplate>) => Promise<void>;
-  onError: (message: string) => void;
-}) {
-  const [draft, setDraft] = useState(() => templateToDraft(activeTemplate));
-  const [saving, setSaving] = useState(false);
-  const custom = activeTemplate.is_builtin !== 1;
-
-  useEffect(() => {
-    setDraft(templateToDraft(activeTemplate));
-  }, [activeTemplate.slug, activeTemplate.updated_at]);
-
-  const save = async () => {
-    if (!custom) return;
-    setSaving(true);
-    try {
-      await onSave({
-        name: draft.name.trim() || activeTemplate.name,
-        page_title: draft.page_title.trim() || activeTemplate.page_title,
-        description: draft.description.trim(),
-        youtube_queries: linesToList(draft.youtube_queries),
-        bilibili_queries: linesToList(draft.bilibili_queries),
-        topic_terms: linesToList(draft.topic_terms),
-        highlight_terms: linesToList(draft.highlight_terms),
-      });
-    } catch (error) {
-      onError(readError(error, "模板保存失败"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const clone = async () => {
-    setSaving(true);
-    try {
-      await onClone();
-    } catch (error) {
-      onError(readError(error, "复制模板失败"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <details className="template-settings">
-      <summary>
-        模板设置
-        <CaretDown size={14} />
-      </summary>
-      <div className="template-settings-popover">
-        <div className="template-settings-head">
-          <strong>{activeTemplate.name}</strong>
-          <span>{custom ? "自定义模板" : "内置模板，复制后可编辑"}</span>
-        </div>
-        <label>
-          名称
-          <input
-            readOnly={!custom}
-            value={draft.name}
-            onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-          />
-        </label>
-        <label>
-          页面标题
-          <input
-            readOnly={!custom}
-            value={draft.page_title}
-            onChange={(event) => setDraft({ ...draft, page_title: event.target.value })}
-          />
-        </label>
-        <label>
-          说明
-          <textarea
-            readOnly={!custom}
-            value={draft.description}
-            onChange={(event) => setDraft({ ...draft, description: event.target.value })}
-          />
-        </label>
-        <div className="template-settings-grid">
-          <label>
-            YouTube 查询词
-            <textarea
-              readOnly={!custom}
-              value={draft.youtube_queries}
-              onChange={(event) => setDraft({ ...draft, youtube_queries: event.target.value })}
-            />
-          </label>
-          <label>
-            B站查询词
-            <textarea
-              readOnly={!custom}
-              value={draft.bilibili_queries}
-              onChange={(event) => setDraft({ ...draft, bilibili_queries: event.target.value })}
-            />
-          </label>
-        </div>
-        <div className="template-settings-grid">
-          <label>
-            相关词
-            <textarea
-              readOnly={!custom}
-              value={draft.topic_terms}
-              onChange={(event) => setDraft({ ...draft, topic_terms: event.target.value })}
-            />
-          </label>
-          <label>
-            高光词
-            <textarea
-              readOnly={!custom}
-              value={draft.highlight_terms}
-              onChange={(event) => setDraft({ ...draft, highlight_terms: event.target.value })}
-            />
-          </label>
-        </div>
-        <div className="template-settings-actions">
-          <button type="button" onClick={clone} disabled={saving}>
-            {saving && !custom ? <SpinnerGap size={15} className="spin" /> : <PlusCircle size={15} />}
-            复制为自定义
-          </button>
-          <button className="primary" type="button" onClick={save} disabled={!custom || saving}>
-            {saving && custom ? <SpinnerGap size={15} className="spin" /> : <CheckCircle size={15} />}
-            保存模板
-          </button>
-        </div>
-      </div>
-    </details>
   );
 }
 
@@ -597,7 +417,6 @@ function ClipWorkspace({
   clip,
   selectedVideo,
   processing,
-  template,
   onDownloadTranslate,
   onRefresh,
   onToast,
@@ -605,7 +424,6 @@ function ClipWorkspace({
   clip: ClipPayload | null;
   selectedVideo: Video | null;
   processing: boolean;
-  template: TopicTemplate;
   onDownloadTranslate: (video: Video) => void;
   onRefresh: () => void;
   onToast: (message: string) => void;
@@ -626,7 +444,7 @@ function ClipWorkspace({
   const rows = buildTranscriptRows(zh, en);
   const lastTranscriptEnd = rows.length ? rows[rows.length - 1].end : 0;
   const timelineDuration = Math.max(mediaDuration, video?.duration_seconds || 0, lastTranscriptEnd, Number(form.end_seconds) || 0, 1);
-  const suggestions = useMemo(() => buildHighlightSuggestions(rows, timelineDuration, template), [rows, timelineDuration, template.slug, template.updated_at]);
+  const suggestions = useMemo(() => buildHighlightSuggestions(rows, timelineDuration), [rows, timelineDuration]);
   const activeTranscriptIndex = rows.findIndex((row) => currentTime >= row.start && currentTime < row.end);
 
   useEffect(() => {
@@ -1396,15 +1214,15 @@ function LoadingRows() {
   );
 }
 
-function EmptyState({ onRun, running, template }: { onRun: () => void; running: boolean; template: TopicTemplate }) {
+function EmptyState({ onRun, running }: { onRun: () => void; running: boolean }) {
   return (
     <div className="empty-state">
       <FilmSlate size={36} />
-      <h2>{template.empty_title}</h2>
-      <p>{template.empty_description}</p>
+      <h2>还没有这个区间的真实采访候选</h2>
+      <p>点击抓取后，系统会按人物名单、AI 采访关键词和重点 B站账号搜索，并按真实发布时间过滤。</p>
       <button className="primary" onClick={onRun} disabled={running}>
         {running ? <SpinnerGap size={17} className="spin" /> : <DownloadSimple size={17} />}
-        {running ? "抓取中" : template.run_button_label}
+        {running ? "抓取中" : "抓取区间 AI 采访"}
       </button>
     </div>
   );
@@ -1488,12 +1306,12 @@ function buildTranscriptRows(zh: Transcript[], en: Transcript[]) {
   }));
 }
 
-function buildHighlightSuggestions(rows: TranscriptRow[], duration: number, template: TopicTemplate): HighlightSuggestion[] {
+function buildHighlightSuggestions(rows: TranscriptRow[], duration: number): HighlightSuggestion[] {
   if (!rows.length) return [];
   const scored = rows
     .map((row, index) => {
       const text = `${row.zh?.text ?? ""} ${row.en?.text ?? ""}`.trim();
-      const score = scoreHighlightText(text, template.highlight_terms);
+      const score = scoreHighlightText(text);
       return { row, index, text, score };
     })
     .filter((item) => item.score > 0 && item.text.length > 10)
@@ -1512,7 +1330,7 @@ function buildHighlightSuggestions(rows: TranscriptRow[], duration: number, temp
       start,
       end,
       label: highlightLabel(item.text),
-      reason: `系统根据字幕中的${template.name}高光词、观点密度和可传播表达自动推荐。`,
+      reason: "系统根据字幕中的观点词、AI 议题和可传播表达自动推荐。",
       quote: trimText(item.text, 120),
       score: item.score,
     });
@@ -1532,7 +1350,7 @@ function buildHighlightSuggestions(rows: TranscriptRow[], duration: number, temp
   }));
 }
 
-function scoreHighlightText(text: string, extraTerms: string[] = []): number {
+function scoreHighlightText(text: string): number {
   const normalized = text.toLowerCase();
   const terms = [
     "agent",
@@ -1564,7 +1382,6 @@ function scoreHighlightText(text: string, extraTerms: string[] = []): number {
     "关键",
     "机会",
     "趋势",
-    ...extraTerms,
   ];
   let score = 0;
   for (const term of terms) {
@@ -1577,10 +1394,6 @@ function scoreHighlightText(text: string, extraTerms: string[] = []): number {
 
 function highlightLabel(text: string): string {
   const normalized = text.toLowerCase();
-  if (normalized.includes("demo") || text.includes("演示")) return "产品演示";
-  if (normalized.includes("launch") || normalized.includes("release") || text.includes("发布")) return "发布重点";
-  if (normalized.includes("pricing") || text.includes("价格")) return "价格信号";
-  if (normalized.includes("customer") || text.includes("客户")) return "客户案例";
   if (normalized.includes("agent") || text.includes("智能体")) return "Agent 观点";
   if (normalized.includes("agi") || text.includes("通用人工智能")) return "AGI 判断";
   if (normalized.includes("safety") || text.includes("安全") || text.includes("风险")) return "安全与风险";
@@ -1601,55 +1414,6 @@ function toSecondInput(seconds: number): string {
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(Math.max(value, min), max);
-}
-
-function templateToDraft(template: TopicTemplate) {
-  return {
-    name: template.name,
-    page_title: template.page_title,
-    description: template.description,
-    youtube_queries: listToLines(template.youtube_queries),
-    bilibili_queries: listToLines(template.bilibili_queries),
-    topic_terms: listToLines(template.topic_terms),
-    highlight_terms: listToLines(template.highlight_terms),
-  };
-}
-
-function listToLines(values: string[]) {
-  return (values || []).join("\n");
-}
-
-function linesToList(value: string) {
-  return value
-    .split(/\n|,|，/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function fallbackTemplate(): TopicTemplate {
-  const timestamp = new Date().toISOString();
-  return {
-    slug: DEFAULT_TEMPLATE_SLUG,
-    name: "AI 采访",
-    page_title: "AI 采访日报",
-    description: "按日期区间追踪 AI 圈新增采访，保留原链，一键下载翻译后进入剪辑。",
-    list_title: "AI 采访列表",
-    run_button_label: "抓取区间 AI 采访",
-    empty_title: "还没有这个区间的真实采访候选",
-    empty_description: "点击抓取后，系统会按人物名单、AI 采访关键词和重点 B站账号搜索，并按真实发布时间过滤。",
-    search_placeholder: "搜人物、标题、频道",
-    summary_focus: "AI/科技趋势",
-    compliance_note: "自动发现只保存元数据和原始链接；下载剪辑前请确认素材授权。",
-    youtube_queries: ["AI interview", "artificial intelligence interview", "AI conversation"],
-    bilibili_queries: ["AI 采访", "人工智能 访谈", "大模型 访谈"],
-    topic_terms: ["ai", "artificial intelligence", "llm", "人工智能", "大模型"],
-    scoring_terms: {},
-    highlight_terms: ["agent", "model", "product", "智能体", "大模型", "产品"],
-    is_builtin: 1,
-    base_slug: "",
-    created_at: timestamp,
-    updated_at: timestamp,
-  };
 }
 
 function defaultBeijingRange() {

@@ -60,20 +60,20 @@ NOISE_PREFIXES = (
 )
 
 
-def build_discovery_summary(title: str, description: str, channel: str, matched_people: str, template: dict | None = None) -> str:
+def build_discovery_summary(title: str, description: str, channel: str, matched_people: str) -> str:
     lead = _lead_sentence(title, description)
-    topics = _extract_topics(title, description, template)
+    topics = _extract_topics(title, description)
     outline = _extract_outline_items(description)
     people = _validated_people(matched_people, title, description) or _infer_person_hint(title, description)
     source = channel or "未知来源"
-    topic_text = "、".join(topics[:3]) if topics else str((template or {}).get("summary_focus") or "AI/科技趋势")
+    topic_text = "、".join(topics[:3]) if topics else "AI/科技趋势"
     main = f"值得看：{people}｜{source}｜聚焦 {topic_text}。{lead[:150]}"
     if outline:
         detail = f"可剪辑点：{'；'.join(outline[:3])}"
     elif topics:
         detail = f"可剪辑点：围绕 {topic_text} 做观点短切，适合先看原片确认嘉宾原话。"
     else:
-        detail = f"可剪辑点：标题和描述命中{(template or {}).get('name') or 'AI 采访'}候选，建议先确认核心信息和原话。"
+        detail = "可剪辑点：标题和描述命中 AI 采访候选，建议先确认嘉宾身份和核心观点。"
     return f"{main} {detail}"
 
 
@@ -88,16 +88,6 @@ def build_transcript_summary(segments: list[dict]) -> str:
 def looks_ai_related(title: str, description: str, channel: str = "") -> bool:
     haystack = f"{title} {description} {channel}".lower()
     return any(term.lower() in haystack for term in AI_TERMS)
-
-
-def looks_related_to_template(title: str, description: str, channel: str = "", template: dict | None = None) -> bool:
-    if not template:
-        return looks_ai_related(title, description, channel)
-    terms = [str(term).lower() for term in template.get("topic_terms", []) if str(term).strip()]
-    if not terms:
-        terms = [str(term).lower() for term in template.get("youtube_queries", []) if str(term).strip()]
-    haystack = f"{title} {description} {channel}".lower()
-    return any(term in haystack for term in terms)
 
 
 def _clean_text(value: str) -> str:
@@ -125,16 +115,9 @@ def _lead_sentence(title: str, description: str) -> str:
     return f"标题显示这是一条围绕“{title[:72]}”的采访/长谈候选。"
 
 
-def _extract_topics(title: str, description: str, template: dict | None = None) -> list[str]:
+def _extract_topics(title: str, description: str) -> list[str]:
     haystack = f"{title} {description}".lower()
     topics = []
-    if template:
-        for term in template.get("topic_terms", []):
-            text = str(term).strip()
-            if text and text.lower() in haystack:
-                topics.append(text)
-            if len(topics) >= 5:
-                return topics
     for label, needles in TOPIC_PATTERNS:
         if any(needle.lower() in haystack for needle in needles):
             topics.append(label)

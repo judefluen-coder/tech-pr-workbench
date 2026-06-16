@@ -43,35 +43,10 @@ export interface SourceRun {
   message: string;
 }
 
-export interface TopicTemplate {
-  slug: string;
-  name: string;
-  page_title: string;
-  description: string;
-  list_title: string;
-  run_button_label: string;
-  empty_title: string;
-  empty_description: string;
-  search_placeholder: string;
-  summary_focus: string;
-  compliance_note: string;
-  youtube_queries: string[];
-  bilibili_queries: string[];
-  topic_terms: string[];
-  scoring_terms: Record<string, number>;
-  highlight_terms: string[];
-  is_builtin: number;
-  base_slug: string;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface DailyReport {
   date: string;
   start_date: string;
   end_date: string;
-  template_slug: string;
-  template: TopicTemplate;
   timezone: string;
   window_start: string;
   window_end: string;
@@ -84,7 +59,6 @@ export interface DailyReport {
 
 export interface Person {
   id: number;
-  template_slug: string;
   name: string;
   english_name: string;
   aliases: string;
@@ -96,7 +70,6 @@ export interface Person {
 
 export interface Video {
   id: number;
-  template_slug: string;
   platform: string;
   external_id: string;
   url: string;

@@ -224,8 +224,6 @@ def extract_candidate_people(title: str, description: str, transcript_text: str 
 
 def person_aliases_for_matching(person: dict) -> list[str]:
     aliases = split_aliases(person["name"], person.get("english_name", ""), person.get("aliases", ""))
-    if person.get("template_slug") == "competitor-launches":
-        return aliases
     return [alias for alias in aliases if not _is_org_alias(alias)]
 
 
@@ -291,10 +289,10 @@ def _alias_matches_guest_context(alias: str, haystack: str) -> bool:
     return any(re.search(pattern, haystack) for pattern in patterns)
 
 
-def topic_confidence(title: str, description: str, duration_seconds: int, weighted_terms: dict[str, float] | None = None) -> float:
+def interview_confidence(title: str, description: str, duration_seconds: int) -> float:
     text = f"{title}\n{description}".lower()
     score = 0.2
-    for keyword, weight in (weighted_terms or INTERVIEW_KEYWORDS).items():
+    for keyword, weight in INTERVIEW_KEYWORDS.items():
         if keyword in text:
             score += weight
     if duration_seconds >= 20 * 60:
@@ -304,10 +302,6 @@ def topic_confidence(title: str, description: str, duration_seconds: int, weight
     if "shorts" in text or "短视频" in text or duration_seconds and duration_seconds < 120:
         score -= 0.18
     return max(0.0, min(score, 1.0))
-
-
-def interview_confidence(title: str, description: str, duration_seconds: int) -> float:
-    return topic_confidence(title, description, duration_seconds, INTERVIEW_KEYWORDS)
 
 
 def priority_score(

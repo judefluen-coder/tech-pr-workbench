@@ -18,22 +18,9 @@ from app.daily import get_daily_report, run_daily_discovery
 from app.db import get_connection, init_db, now_iso, row_to_dict
 from app.downloads import list_download_tasks, run_authorized_download
 from app.exports import clip_marks_to_csv, segments_to_srt, segments_to_vtt
-from app.schemas import (
-    AutomationRequest,
-    ClipMarkCreate,
-    DailyRunRequest,
-    DownloadRequest,
-    DownloadTranslateRequest,
-    PersonCreate,
-    RenderClipsRequest,
-    TemplateCloneRequest,
-    TemplateUpdateRequest,
-    VideoUpdate,
-    YoutubeSyncRequest,
-)
+from app.schemas import AutomationRequest, ClipMarkCreate, DailyRunRequest, DownloadRequest, DownloadTranslateRequest, PersonCreate, RenderClipsRequest, VideoUpdate, YoutubeSyncRequest
 from app.seed import seed_people_if_empty
 from app.system import system_status
-from app.templates import DEFAULT_TEMPLATE_SLUG, clone_template, list_templates, update_template
 from app.media import import_authorized_media
 from app.workflow import clip_payload, create_download_translate_job, get_job, run_download_translate_job
 from app.youtube import sync_youtube
@@ -116,37 +103,10 @@ def dashboard() -> dict:
     }
 
 
-@app.get("/api/templates")
-def templates_endpoint() -> list[dict]:
-    return list_templates()
-
-
-@app.post("/api/templates/{slug}/clone")
-def clone_template_endpoint(slug: str, payload: TemplateCloneRequest | None = None) -> dict:
-    payload = payload or TemplateCloneRequest()
-    try:
-        return clone_template(slug, payload.name, payload.slug)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@app.patch("/api/templates/{slug}")
-def update_template_endpoint(slug: str, payload: TemplateUpdateRequest) -> dict:
-    try:
-        return update_template(slug, payload.model_dump(exclude_none=True))
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
 @app.get("/api/daily")
-def daily(
-    date: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    template_slug: str = DEFAULT_TEMPLATE_SLUG,
-) -> dict:
+def daily(date: str | None = None, start_date: str | None = None, end_date: str | None = None) -> dict:
     try:
-        return get_daily_report(start_date or date, end_date, template_slug)
+        return get_daily_report(start_date or date, end_date)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -154,7 +114,7 @@ def daily(
 @app.post("/api/daily/run")
 async def daily_run(payload: DailyRunRequest) -> dict:
     try:
-        return await run_daily_discovery(payload.date, payload.limit_per_query, payload.start_date, payload.end_date, payload.template_slug)
+        return await run_daily_discovery(payload.date, payload.limit_per_query, payload.start_date, payload.end_date)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -168,15 +128,9 @@ def job_detail(job_id: int) -> dict:
 
 
 @app.get("/api/people")
-def list_people(template_slug: str = DEFAULT_TEMPLATE_SLUG) -> list[dict]:
+def list_people() -> list[dict]:
     with get_connection() as conn:
-        return [
-            row_to_dict(row)
-            for row in conn.execute(
-                "SELECT * FROM people WHERE template_slug = ? ORDER BY priority DESC, id DESC",
-                (template_slug,),
-            ).fetchall()
-        ]
+        return [row_to_dict(row) for row in conn.execute("SELECT * FROM people ORDER BY priority DESC, id DESC").fetchall()]
 
 
 @app.post("/api/people")
@@ -185,19 +139,10 @@ def create_person(payload: PersonCreate) -> dict:
     with get_connection() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO people (template_slug, name, english_name, aliases, priority, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO people (name, english_name, aliases, priority, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                payload.template_slug,
-                payload.name,
-                payload.english_name,
-                payload.aliases,
-                payload.priority,
-                payload.notes,
-                timestamp,
-                timestamp,
-            ),
+            (payload.name, payload.english_name, payload.aliases, payload.priority, payload.notes, timestamp, timestamp),
         )
         return row_to_dict(conn.execute("SELECT * FROM people WHERE id = ?", (cursor.lastrowid,)).fetchone())
 
@@ -236,11 +181,10 @@ async def import_people_csv(file: UploadFile = File(...)) -> dict:
 def list_videos(
     status: str | None = None,
     search: str = "",
-    template_slug: str = DEFAULT_TEMPLATE_SLUG,
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[dict]:
-    clauses = ["(videos.template_slug = ? OR video_template_links.template_slug = ?)"]
-    params: list[object] = [template_slug, template_slug]
+    clauses = []
+    params: list[object] = []
     if status:
         clauses.append("status = ?")
         params.append(status)
@@ -254,9 +198,7 @@ def list_videos(
             row_to_dict(row)
             for row in conn.execute(
                 f"""
-                SELECT DISTINCT videos.* FROM videos
-                LEFT JOIN video_template_links
-                  ON video_template_links.video_id = videos.id
+                SELECT * FROM videos
                 {where}
                 ORDER BY priority_score DESC, published_at DESC, id DESC
                 LIMIT ?
@@ -314,12 +256,7 @@ async def sync_youtube_endpoint(payload: YoutubeSyncRequest) -> dict:
         )
         job_id = cursor.lastrowid
     try:
-        result = await sync_youtube(
-            payload.days_back,
-            payload.limit_per_query,
-            payload.include_demo_when_unconfigured,
-            template_slug=payload.template_slug,
-        )
+        result = await sync_youtube(payload.days_back, payload.limit_per_query, payload.include_demo_when_unconfigured)
         status = "completed"
         message = result.get("message", "")
     except Exception as exc:

@@ -18,11 +18,9 @@ from app.scoring import (
     people_signals_for_video,
     priority_score,
     split_aliases,
-    topic_confidence,
 )
 from app.seed import seed_demo_videos
-from app.summaries import build_discovery_summary, looks_related_to_template
-from app.templates import DEFAULT_TEMPLATE_SLUG, get_template, get_template_from_conn
+from app.summaries import build_discovery_summary, looks_ai_related
 
 YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
@@ -43,13 +41,11 @@ async def sync_youtube(
     include_demo_when_unconfigured: bool = True,
     published_after: str | None = None,
     published_before: str | None = None,
-    template_slug: str = DEFAULT_TEMPLATE_SLUG,
 ) -> dict:
-    template = get_template(template_slug)
     if not settings.youtube_api_key:
         if settings.opencli_discovery_enabled:
             try:
-                result = _sync_with_opencli_search(limit_per_query, published_after, published_before, template["slug"])
+                result = _sync_with_opencli_search(limit_per_query, published_after, published_before)
                 if result["candidates"] or result["inserted"]:
                     return result
             except Exception as exc:
@@ -57,7 +53,7 @@ async def sync_youtube(
                     raise HTTPException(status_code=502, detail=f"opencli 搜索失败：{exc}") from exc
         if settings.local_ytdlp_discovery:
             try:
-                result = _sync_with_ytdlp_search(limit_per_query, published_after, published_before, template["slug"])
+                result = _sync_with_ytdlp_search(limit_per_query, published_after, published_before)
                 if result["inserted"] or not include_demo_when_unconfigured:
                     return result
             except Exception as exc:
@@ -69,7 +65,7 @@ async def sync_youtube(
                 "inserted": 0,
                 "message": "未配置 YOUTUBE_API_KEY；本机补充搜索没有返回区间内可验证日期的视频。未生成 demo 数据。",
             }
-        inserted = seed_demo_videos() if template["slug"] == DEFAULT_TEMPLATE_SLUG else 0
+        inserted = seed_demo_videos()
         return {
             "mode": "demo",
             "inserted": inserted,
@@ -77,13 +73,7 @@ async def sync_youtube(
         }
 
     with get_connection() as conn:
-        people = [
-            dict(row)
-            for row in conn.execute(
-                "SELECT * FROM people WHERE template_slug = ? ORDER BY priority DESC, id ASC",
-                (template["slug"],),
-            ).fetchall()
-        ]
+        people = [dict(row) for row in conn.execute("SELECT * FROM people ORDER BY priority DESC, id ASC").fetchall()]
     if not people:
         return {"mode": "live", "inserted": 0, "message": "人物名单为空。"}
 
@@ -94,16 +84,16 @@ async def sync_youtube(
         for person in people:
             aliases = split_aliases(person["name"], person.get("english_name", ""), person.get("aliases", ""))
             for alias in aliases[:3]:
-                for keyword in (template.get("youtube_queries") or QUERY_KEYWORDS)[:3]:
+                for keyword in QUERY_KEYWORDS[:3]:
                     query = f"{alias} {keyword}"
                     query_count += 1
                     ids = await _search_video_ids(client, query, published_after_value, limit_per_query, published_before)
                     video_ids.update(ids)
-                    _record_source_query(person["id"], query, template["slug"])
+                    _record_source_query(person["id"], query)
 
         details = await _fetch_video_details(client, sorted(video_ids))
 
-    inserted = _upsert_video_details(details, template["slug"])
+    inserted = _upsert_video_details(details)
     return {
         "mode": "live",
         "queried": query_count,
@@ -158,11 +148,11 @@ async def _fetch_video_details(client: httpx.AsyncClient, ids: list[str]) -> lis
     return details
 
 
-def _record_source_query(person_id: int, query: str, template_slug: str = DEFAULT_TEMPLATE_SLUG) -> None:
+def _record_source_query(person_id: int, query: str) -> None:
     with get_connection() as conn:
         existing = conn.execute(
-            "SELECT id FROM source_queries WHERE template_slug = ? AND person_id = ? AND query = ?",
-            (template_slug, person_id, query),
+            "SELECT id FROM source_queries WHERE person_id = ? AND query = ?",
+            (person_id, query),
         ).fetchone()
         timestamp = now_iso()
         if existing:
@@ -170,19 +160,18 @@ def _record_source_query(person_id: int, query: str, template_slug: str = DEFAUL
         else:
             conn.execute(
                 """
-                INSERT INTO source_queries (template_slug, person_id, platform, query, last_run_at, created_at)
-                VALUES (?, ?, 'youtube', ?, ?, ?)
+                INSERT INTO source_queries (person_id, platform, query, last_run_at, created_at)
+                VALUES (?, 'youtube', ?, ?, ?)
                 """,
-                (template_slug, person_id, query, timestamp, timestamp),
+                (person_id, query, timestamp, timestamp),
             )
 
 
-def _upsert_video_details(details: list[dict], template_slug: str = DEFAULT_TEMPLATE_SLUG) -> int:
+def _upsert_video_details(details: list[dict]) -> int:
     if not details:
         return 0
     with get_connection() as conn:
-        template = get_template_from_conn(conn, template_slug)
-        people = [dict(row) for row in conn.execute("SELECT * FROM people WHERE template_slug = ?", (template["slug"],)).fetchall()]
+        people = [dict(row) for row in conn.execute("SELECT * FROM people").fetchall()]
         inserted_or_updated = 0
         for item in details:
             snippet = item.get("snippet", {})
@@ -195,7 +184,7 @@ def _upsert_video_details(details: list[dict], template_slug: str = DEFAULT_TEMP
             duration = parse_youtube_duration(content.get("duration", ""))
             channel = snippet.get("channelTitle", "")
             matches, names, candidate_people, reason = people_signals_for_video(title, description, channel, people)
-            confidence = topic_confidence(title, description, duration, template.get("scoring_terms") or None)
+            confidence = interview_confidence(title, description, duration)
             score = priority_score(
                 matches,
                 confidence,
@@ -203,7 +192,7 @@ def _upsert_video_details(details: list[dict], template_slug: str = DEFAULT_TEMP
                 channel,
                 int(stats.get("viewCount", 0) or 0),
             )
-            summary = build_discovery_summary(title, description, channel, names or candidate_people, template)
+            summary = build_discovery_summary(title, description, channel, names or candidate_people)
             thumbnails = snippet.get("thumbnails", {})
             thumbnail_url = (
                 thumbnails.get("high", {}).get("url")
@@ -214,13 +203,12 @@ def _upsert_video_details(details: list[dict], template_slug: str = DEFAULT_TEMP
             cursor = conn.execute(
                 """
                 INSERT INTO videos (
-                  template_slug, platform, external_id, url, title, description, channel_title, published_at,
+                  platform, external_id, url, title, description, channel_title, published_at,
                   duration_seconds, view_count, like_count, thumbnail_url, matched_people,
                   candidate_people, people_match_reason, interview_confidence, priority_score, status, compliance_note, summary, source_tier, created_at, updated_at
                 )
-                VALUES (?, 'youtube', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 'metadata_only', ?, 'stable', ?, ?)
+                VALUES ('youtube', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 'metadata_only', ?, 'stable', ?, ?)
                 ON CONFLICT(platform, external_id) DO UPDATE SET
-                  template_slug = excluded.template_slug,
                   title = excluded.title,
                   description = excluded.description,
                   channel_title = excluded.channel_title,
@@ -239,7 +227,6 @@ def _upsert_video_details(details: list[dict], template_slug: str = DEFAULT_TEMP
                   updated_at = excluded.updated_at
                 """,
                 (
-                    template["slug"],
                     external_id,
                     f"https://www.youtube.com/watch?v={external_id}",
                     title,
@@ -260,28 +247,13 @@ def _upsert_video_details(details: list[dict], template_slug: str = DEFAULT_TEMP
                     timestamp,
                 ),
             )
-            video_row = conn.execute("SELECT id FROM videos WHERE platform = 'youtube' AND external_id = ?", (external_id,)).fetchone()
-            if video_row:
-                _link_video_template(conn, video_row["id"], template["slug"])
             inserted_or_updated += max(cursor.rowcount, 0)
         return inserted_or_updated
 
 
-def _sync_with_ytdlp_search(
-    limit_per_query: int,
-    published_after: str | None = None,
-    published_before: str | None = None,
-    template_slug: str = DEFAULT_TEMPLATE_SLUG,
-) -> dict:
+def _sync_with_ytdlp_search(limit_per_query: int, published_after: str | None = None, published_before: str | None = None) -> dict:
     with get_connection() as conn:
-        template = get_template_from_conn(conn, template_slug)
-        people = [
-            dict(row)
-            for row in conn.execute(
-                "SELECT * FROM people WHERE template_slug = ? ORDER BY priority DESC, id ASC LIMIT 10",
-                (template["slug"],),
-            ).fetchall()
-        ]
+        people = [dict(row) for row in conn.execute("SELECT * FROM people ORDER BY priority DESC, id ASC LIMIT 10").fetchall()]
     if not people:
         return {"mode": "local_yt_dlp_search", "inserted": 0, "message": "人物名单为空。"}
 
@@ -290,12 +262,12 @@ def _sync_with_ytdlp_search(
     for person in people:
         aliases = split_aliases(person["name"], person.get("english_name", ""), person.get("aliases", ""))
         alias = aliases[0] if aliases else person["name"]
-        query = f"{alias} {(template.get('youtube_queries') or QUERY_KEYWORDS)[0]}"
+        query = f"{alias} AI interview"
         query_count += 1
         items.extend(_run_ytdlp_search(query, min(limit_per_query, 3)))
-        _record_source_query(person["id"], f"yt-dlp:{query}", template["slug"])
+        _record_source_query(person["id"], f"yt-dlp:{query}")
 
-    inserted = _upsert_ytdlp_items(items, published_after, published_before, template["slug"])
+    inserted = _upsert_ytdlp_items(items, published_after, published_before)
     return {
         "mode": "local_yt_dlp_search",
         "queried": query_count,
@@ -305,18 +277,12 @@ def _sync_with_ytdlp_search(
     }
 
 
-def _sync_with_opencli_search(
-    limit_per_query: int,
-    published_after: str | None = None,
-    published_before: str | None = None,
-    template_slug: str = DEFAULT_TEMPLATE_SLUG,
-) -> dict:
+def _sync_with_opencli_search(limit_per_query: int, published_after: str | None = None, published_before: str | None = None) -> dict:
     opencli = shutil.which(settings.opencli_path) or shutil.which("opencli")
     if not opencli:
         return {"mode": "opencli_youtube_search", "queried": 0, "candidates": 0, "inserted": 0, "message": "未找到 opencli 命令。"}
 
-    template = get_template(template_slug)
-    queries = _opencli_queries(published_after, published_before, template)
+    queries = _opencli_queries(published_after, published_before)
     raw_items: list[dict] = []
     for query in queries:
         raw_items.extend(_run_opencli_youtube_search(opencli, query, max(limit_per_query, 5)))
@@ -335,7 +301,7 @@ def _sync_with_opencli_search(
             metadata.setdefault("channel", item.get("channel", ""))
             enriched.append(metadata)
 
-    inserted = _upsert_ytdlp_items(enriched, published_after, published_before, template["slug"])
+    inserted = _upsert_ytdlp_items(enriched, published_after, published_before)
     return {
         "mode": "opencli_youtube_search",
         "queried": len(queries),
@@ -345,11 +311,14 @@ def _sync_with_opencli_search(
     }
 
 
-def _opencli_queries(published_after: str | None, published_before: str | None, template: dict | None = None) -> list[str]:
+def _opencli_queries(published_after: str | None, published_before: str | None) -> list[str]:
     start, before = _query_date_bounds(published_after, published_before)
     date_clause = f" after:{start} before:{before}" if start and before else ""
-    queries = (template or {}).get("youtube_queries") or QUERY_KEYWORDS
-    return [f"{query}{date_clause}" for query in queries[:4]]
+    return [
+        f"AI interview{date_clause}",
+        f"artificial intelligence CEO interview{date_clause}",
+        f"OpenAI Anthropic DeepMind NVIDIA interview{date_clause}",
+    ]
 
 
 def _query_date_bounds(published_after: str | None, published_before: str | None) -> tuple[str, str]:
@@ -438,17 +407,11 @@ def _run_ytdlp_search(query: str, limit: int) -> list[dict]:
     return entries
 
 
-def _upsert_ytdlp_items(
-    items: list[dict],
-    published_after: str | None = None,
-    published_before: str | None = None,
-    template_slug: str = DEFAULT_TEMPLATE_SLUG,
-) -> int:
+def _upsert_ytdlp_items(items: list[dict], published_after: str | None = None, published_before: str | None = None) -> int:
     if not items:
         return 0
     with get_connection() as conn:
-        template = get_template_from_conn(conn, template_slug)
-        people = [dict(row) for row in conn.execute("SELECT * FROM people WHERE template_slug = ?", (template["slug"],)).fetchall()]
+        people = [dict(row) for row in conn.execute("SELECT * FROM people").fetchall()]
         inserted_or_updated = 0
         for item in items:
             external_id = item.get("id") or item.get("url")
@@ -456,7 +419,7 @@ def _upsert_ytdlp_items(
                 continue
             title = item.get("title", "")
             description = item.get("description", "") or ""
-            if not looks_related_to_template(title, description, item.get("channel") or item.get("uploader") or "", template):
+            if not looks_ai_related(title, description, item.get("channel") or item.get("uploader") or ""):
                 continue
             url = item.get("webpage_url") or item.get("url") or f"https://www.youtube.com/watch?v={external_id}"
             if external_id and "youtube.com" not in url and "youtu.be" not in url:
@@ -467,21 +430,20 @@ def _upsert_ytdlp_items(
             if not published_at or not _within_utc_window(published_at, published_after, published_before):
                 continue
             matches, names, candidate_people, reason = people_signals_for_video(title, description, channel, people)
-            confidence = topic_confidence(title, description, duration, template.get("scoring_terms") or None)
+            confidence = interview_confidence(title, description, duration)
             view_count = int(item.get("view_count") or 0)
             score = priority_score(matches, confidence, published_at, channel, view_count)
-            summary = build_discovery_summary(title, description, channel, names or candidate_people, template)
+            summary = build_discovery_summary(title, description, channel, names or candidate_people)
             timestamp = now_iso()
             cursor = conn.execute(
                 """
                 INSERT INTO videos (
-                  template_slug, platform, external_id, url, title, description, channel_title, published_at,
+                  platform, external_id, url, title, description, channel_title, published_at,
                   duration_seconds, view_count, like_count, thumbnail_url, matched_people,
                   candidate_people, people_match_reason, interview_confidence, priority_score, status, compliance_note, summary, source_tier, created_at, updated_at
                 )
-                VALUES (?, 'youtube', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 'ready', 'metadata_only', ?, 'stable', ?, ?)
+                VALUES ('youtube', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 'ready', 'metadata_only', ?, 'stable', ?, ?)
                 ON CONFLICT(platform, external_id) DO UPDATE SET
-                  template_slug = excluded.template_slug,
                   title = excluded.title,
                   url = excluded.url,
                   channel_title = excluded.channel_title,
@@ -499,7 +461,6 @@ def _upsert_ytdlp_items(
                   updated_at = excluded.updated_at
                 """,
                 (
-                    template["slug"],
                     str(external_id),
                     url,
                     title,
@@ -519,18 +480,8 @@ def _upsert_ytdlp_items(
                     timestamp,
                 ),
             )
-            video_row = conn.execute("SELECT id FROM videos WHERE platform = 'youtube' AND external_id = ?", (str(external_id),)).fetchone()
-            if video_row:
-                _link_video_template(conn, video_row["id"], template["slug"])
             inserted_or_updated += max(cursor.rowcount, 0)
         return inserted_or_updated
-
-
-def _link_video_template(conn, video_id: int, template_slug: str) -> None:
-    conn.execute(
-        "INSERT OR IGNORE INTO video_template_links (video_id, template_slug, created_at) VALUES (?, ?, ?)",
-        (video_id, template_slug, now_iso()),
-    )
 
 
 def _published_at_from_ytdlp(item: dict) -> str:

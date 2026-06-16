@@ -6,9 +6,8 @@ from zoneinfo import ZoneInfo
 from app.db import get_connection, now_iso
 from app.scoring import interview_confidence, people_signals_for_video, priority_score
 from app.summaries import build_discovery_summary
-from app.templates import DEFAULT_TEMPLATE_SLUG, get_template_from_conn
 
-AI_PEOPLE = [
+DEFAULT_PEOPLE = [
     ("Sam Altman", "Sam Altman", "OpenAI, Altman", 5, "AI 公司与平台生态重点人物"),
     ("Greg Brockman", "Greg Brockman", "OpenAI, Brockman", 4, "OpenAI 与 AI 工程化重点人物"),
     ("Dario Amodei", "Dario Amodei", "Anthropic, Claude", 5, "AI 安全与模型公司重点人物"),
@@ -41,36 +40,6 @@ AI_PEOPLE = [
     ("姜大昕", "Jiang Daxin", "阶跃星辰, StepFun", 4, "中国大模型公司观察池"),
     ("周靖人", "Zhou Jingren", "阿里通义, Tongyi, Qwen", 4, "中国大模型与云生态观察池"),
 ]
-
-TECH_EXECUTIVE_PEOPLE = [
-    ("Satya Nadella", "Satya Nadella", "Microsoft, Azure", 5, "微软云与 AI 平台高管"),
-    ("Sundar Pichai", "Sundar Pichai", "Google, Alphabet", 5, "Google/Alphabet 高管发声"),
-    ("Jensen Huang", "Jensen Huang", "NVIDIA, 黄仁勋", 5, "AI 基础设施与芯片高管"),
-    ("Lisa Su", "Lisa Su", "AMD, 苏姿丰", 4, "芯片产业高管"),
-    ("Mark Zuckerberg", "Mark Zuckerberg", "Meta, Zuckerberg", 4, "Meta 产品与平台战略"),
-    ("Tim Cook", "Tim Cook", "Apple", 4, "Apple 高管发声"),
-    ("Andy Jassy", "Andy Jassy", "Amazon, AWS", 4, "云计算与企业服务高管"),
-    ("Shantanu Narayen", "Shantanu Narayen", "Adobe", 3, "创意软件与企业软件高管"),
-]
-
-COMPETITOR_LAUNCH_PEOPLE = [
-    ("OpenAI", "OpenAI", "ChatGPT, GPT, Sora", 5, "AI 产品发布与演示"),
-    ("Anthropic", "Anthropic", "Claude", 5, "AI 产品发布与演示"),
-    ("Google", "Google", "Gemini, DeepMind, Google Cloud", 5, "搜索、云与 AI 产品发布"),
-    ("Microsoft", "Microsoft", "Copilot, Azure, GitHub", 5, "企业 AI 与开发者产品发布"),
-    ("Meta", "Meta", "Llama, Meta AI", 4, "开源模型与社交产品发布"),
-    ("Apple", "Apple", "iOS, macOS, Apple Intelligence", 4, "消费电子与系统发布"),
-    ("NVIDIA", "NVIDIA", "CUDA, GPU, Blackwell", 4, "芯片、开发者平台与生态发布"),
-    ("Canva", "Canva", "Magic Studio", 3, "创意工具竞品发布"),
-]
-
-TEMPLATE_PEOPLE = {
-    DEFAULT_TEMPLATE_SLUG: AI_PEOPLE,
-    "tech-executive-interviews": TECH_EXECUTIVE_PEOPLE,
-    "competitor-launches": COMPETITOR_LAUNCH_PEOPLE,
-}
-
-DEFAULT_PEOPLE = AI_PEOPLE
 
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -116,31 +85,26 @@ def _demo_videos() -> list[dict]:
 def seed_people_if_empty() -> None:
     with get_connection() as conn:
         timestamp = now_iso()
-        for template_slug, people in TEMPLATE_PEOPLE.items():
-            existing = {
-                row["name"]
-                for row in conn.execute("SELECT name FROM people WHERE template_slug = ?", (template_slug,)).fetchall()
-            }
-            rows = [
-                (template_slug, name, english, aliases, priority, notes, timestamp, timestamp)
-                for name, english, aliases, priority, notes in people
-                if name not in existing
-            ]
-            if rows:
-                conn.executemany(
-                    """
-                    INSERT INTO people (template_slug, name, english_name, aliases, priority, notes, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    rows,
-                )
+        existing = {row["name"] for row in conn.execute("SELECT name FROM people").fetchall()}
+        rows = [
+            (name, english, aliases, priority, notes, timestamp, timestamp)
+            for name, english, aliases, priority, notes in DEFAULT_PEOPLE
+            if name not in existing
+        ]
+        if rows:
+            conn.executemany(
+                """
+                INSERT INTO people (name, english_name, aliases, priority, notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
 
 
 def seed_demo_videos() -> int:
     seed_people_if_empty()
     with get_connection() as conn:
-        people = [dict(row) for row in conn.execute("SELECT * FROM people WHERE template_slug = ?", (DEFAULT_TEMPLATE_SLUG,)).fetchall()]
-        template = get_template_from_conn(conn, DEFAULT_TEMPLATE_SLUG)
+        people = [dict(row) for row in conn.execute("SELECT * FROM people").fetchall()]
         inserted = 0
         for item in _demo_videos():
             matches, names, candidate_people, reason = people_signals_for_video(
@@ -148,18 +112,17 @@ def seed_demo_videos() -> int:
             )
             confidence = interview_confidence(item["title"], item["description"], item["duration_seconds"])
             score = priority_score(matches, confidence, item["published_at"], item["channel_title"], item["view_count"])
-            summary = build_discovery_summary(item["title"], item["description"], item["channel_title"], names or candidate_people, template)
+            summary = build_discovery_summary(item["title"], item["description"], item["channel_title"], names or candidate_people)
             timestamp = now_iso()
             cursor = conn.execute(
                 """
                 INSERT INTO videos (
-                  template_slug, platform, external_id, url, title, description, channel_title, published_at,
+                  platform, external_id, url, title, description, channel_title, published_at,
                   duration_seconds, view_count, thumbnail_url, matched_people, candidate_people, people_match_reason, interview_confidence,
                   priority_score, status, compliance_note, summary, source_tier, created_at, updated_at
                 )
-                VALUES (?, 'youtube', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 'metadata_only', ?, 'stable', ?, ?)
+                VALUES ('youtube', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 'metadata_only', ?, 'stable', ?, ?)
                 ON CONFLICT(platform, external_id) DO UPDATE SET
-                  template_slug = excluded.template_slug,
                   title = excluded.title,
                   description = excluded.description,
                   channel_title = excluded.channel_title,
@@ -177,7 +140,6 @@ def seed_demo_videos() -> int:
                   updated_at = excluded.updated_at
                 """,
                 (
-                    DEFAULT_TEMPLATE_SLUG,
                     item["external_id"],
                     item["url"],
                     item["title"],
@@ -197,12 +159,6 @@ def seed_demo_videos() -> int:
                     timestamp,
                 ),
             )
-            video_row = conn.execute("SELECT id FROM videos WHERE platform = 'youtube' AND external_id = ?", (item["external_id"],)).fetchone()
-            if video_row:
-                conn.execute(
-                    "INSERT OR IGNORE INTO video_template_links (video_id, template_slug, created_at) VALUES (?, ?, ?)",
-                    (video_row["id"], DEFAULT_TEMPLATE_SLUG, timestamp),
-                )
             inserted += cursor.rowcount
         return inserted
 

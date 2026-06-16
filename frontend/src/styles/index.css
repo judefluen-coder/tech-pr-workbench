@@ -130,9 +130,7 @@ h3 {
 button,
 a,
 .date-control,
-.search-control,
-.template-control,
-.template-settings > summary {
+.search-control {
   min-height: 36px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
@@ -183,9 +181,7 @@ a.disabled {
 }
 
 .date-control,
-.search-control,
-.template-control,
-.template-settings > summary {
+.search-control {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -193,8 +189,7 @@ a.disabled {
   color: var(--muted);
 }
 
-.date-control span,
-.template-control span {
+.date-control span {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
@@ -202,114 +197,13 @@ a.disabled {
 }
 
 .date-control input,
-.search-control input,
-.template-control select {
+.search-control input {
   width: 100%;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text);
   font-size: 13px;
-}
-
-.template-control {
-  min-width: 178px;
-}
-
-.template-control select {
-  font-weight: 750;
-}
-
-.template-settings {
-  position: relative;
-}
-
-.template-settings > summary {
-  list-style: none;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 750;
-}
-
-.template-settings > summary::-webkit-details-marker {
-  display: none;
-}
-
-.template-settings-popover {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 8px);
-  right: 0;
-  width: min(560px, calc(100vw - 36px));
-  display: grid;
-  gap: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: 0 20px 42px rgba(15, 23, 42, 0.18);
-  color: var(--text);
-  padding: 14px;
-}
-
-.template-settings-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.template-settings-head strong {
-  font-size: 14px;
-}
-
-.template-settings-head span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.template-settings label {
-  display: grid;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.template-settings input,
-.template-settings textarea {
-  width: 100%;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--surface-tint);
-  color: var(--text);
-  padding: 9px 10px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.template-settings textarea {
-  min-height: 74px;
-  resize: vertical;
-  line-height: 1.45;
-}
-
-.template-settings input[readonly],
-.template-settings textarea[readonly] {
-  color: var(--muted);
-  background: #f1f5f9;
-}
-
-.template-settings-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.template-settings-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 .summary-strip {
@@ -1207,27 +1101,10 @@ label textarea {
   }
 
   .date-control,
-  .template-control,
-  .template-settings,
-  .template-settings > summary,
   .search-control,
   .header-actions button,
   .export-actions a {
     width: 100%;
-  }
-
-  .template-settings-popover {
-    position: fixed;
-    top: 88px;
-    right: 9px;
-    left: 9px;
-    width: auto;
-    max-height: calc(100dvh - 112px);
-    overflow: auto;
-  }
-
-  .template-settings-grid {
-    grid-template-columns: 1fr;
   }
 
   .summary-strip,
@@ -1349,9 +1226,7 @@ body {
   justify-content: flex-end;
 }
 
-.app-header .date-control,
-.app-header .template-control,
-.app-header .template-settings > summary {
+.app-header .date-control {
   min-width: 174px;
   border-color: rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.08);
@@ -1359,15 +1234,11 @@ body {
 }
 
 .app-header .date-control span,
-.app-header .date-control input,
-.app-header .template-control span,
-.app-header .template-control select,
-.app-header .template-settings > summary {
+.app-header .date-control input {
   color: #f8fafc;
 }
 
-.app-header .date-control svg,
-.app-header .template-settings > summary svg {
+.app-header .date-control svg {
   color: #9dd9c0;
 }
 
@@ -1737,9 +1608,7 @@ label textarea {
 label input:focus,
 label textarea:focus,
 .date-control:focus-within,
-.search-control:focus-within,
-.template-control:focus-within,
-.template-settings > summary:focus-visible {
+.search-control:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(35, 87, 215, 0.12);
 }

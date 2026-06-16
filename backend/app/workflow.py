@@ -10,7 +10,6 @@ from app.config import settings
 from app.db import get_connection, now_iso, row_to_dict
 from app.downloads import run_authorized_download
 from app.scoring import people_signals_for_video, priority_score
-from app.templates import DEFAULT_TEMPLATE_SLUG
 from app.summaries import build_transcript_summary
 
 
@@ -239,8 +238,7 @@ def _promote_translated_to_clip_ready(video_id: int) -> None:
 def _people_signals_after_transcript(video_id: int) -> tuple[str, str, str, float]:
     with get_connection() as conn:
         video = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
-        template_slug = video["template_slug"] if video else DEFAULT_TEMPLATE_SLUG
-        people = [dict(row) for row in conn.execute("SELECT * FROM people WHERE template_slug = ?", (template_slug,)).fetchall()]
+        people = [dict(row) for row in conn.execute("SELECT * FROM people").fetchall()]
         transcripts = [
             row_to_dict(row)
             for row in conn.execute(
