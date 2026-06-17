@@ -1,4 +1,4 @@
-import { existsSync, copyFileSync } from "node:fs";
+import { existsSync, copyFileSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -11,6 +11,27 @@ const checkOnly = args.has("--check-only");
 
 function command(name) {
   return process.platform === "win32" ? `${name}.cmd` : name;
+}
+
+function readEnvConfig() {
+  const envPath = existsSync(join(root, ".env")) ? join(root, ".env") : join(root, ".env.example");
+  const values = {};
+  try {
+    for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (!match) continue;
+      values[match[1]] = match[2].trim().replace(/^['"]|['"]$/g, "");
+    }
+  } catch {
+    return values;
+  }
+  return values;
+}
+
+function configuredValue(env, key, fallback) {
+  return process.env[key] || env[key] || fallback;
 }
 
 function runChecked(label, cmd, cmdArgs) {
@@ -54,6 +75,8 @@ function install() {
 }
 
 function doctor({ strict = false } = {}) {
+  const env = readEnvConfig();
+  const opencliCommand = configuredValue(env, "OPENCLI_PATH", "opencli");
   const required = [
     ["Node.js", command("node"), "Install Node.js 20+ first. macOS: brew install node", ["--version"]],
     ["npm", command("npm"), "Install npm with Node.js first.", ["--version"]],
@@ -71,7 +94,7 @@ function doctor({ strict = false } = {}) {
   }
 
   const optional = [
-    ["opencli", "opencli", "Optional fallback for YouTube search when no YouTube API key is configured."],
+    [`opencli (${opencliCommand})`, opencliCommand, "Optional fallback for YouTube search when no YouTube API key is configured."],
     ["Ollama", "ollama", "Optional local LLM translation fallback."],
   ];
   console.log("\nOptional tools");
