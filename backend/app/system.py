@@ -7,11 +7,13 @@ import subprocess
 import httpx
 
 from app.config import settings
+from app.opencli_runtime import opencli_path
 
 
 def system_status() -> dict:
     ffmpeg_path = shutil.which("ffmpeg")
-    yt_dlp_ok, yt_dlp_version = _module_version("yt_dlp")
+    yt_dlp_ok, yt_dlp_version = _yt_dlp_status()
+    opencli_ok, opencli_message = _opencli_status()
     argos_ok, argos_message = _argos_status()
     ollama_ok, ollama_message = _ollama_status()
     return {
@@ -24,6 +26,11 @@ def system_status() -> dict:
             "ok": yt_dlp_ok,
             "label": "yt-dlp",
             "message": yt_dlp_version if yt_dlp_ok else "未安装，无法本机搜索或授权下载。",
+        },
+        "opencli": {
+            "ok": opencli_ok,
+            "label": "OpenCLI Browser Bridge",
+            "message": opencli_message,
         },
         "ffmpeg": {
             "ok": bool(ffmpeg_path),
@@ -53,10 +60,37 @@ def system_status() -> dict:
     }
 
 
-def _module_version(module: str) -> tuple[bool, str]:
+def _yt_dlp_status() -> tuple[bool, str]:
+    configured = settings.ytdlp_path.strip()
+    command = shutil.which(configured) if configured else None
+    if not command:
+        command = shutil.which("yt-dlp")
+    if not command:
+        return False, "未找到 yt-dlp 命令。"
+    ok, message = _command_version([command, "--version"])
+    return ok, f"{command} ({message})" if ok else message
+
+
+def _opencli_status() -> tuple[bool, str]:
+    opencli = opencli_path()
+    if not opencli:
+        return False, "未找到 opencli 命令。"
+    try:
+        completed = subprocess.run([opencli, "daemon", "status"], capture_output=True, text=True, timeout=5)
+    except Exception as exc:
+        return False, f"OpenCLI 状态检查失败：{exc}"
+    output = "\n".join(part for part in [completed.stdout.strip(), completed.stderr.strip()] if part)
+    if completed.returncode != 0:
+        return False, output or "OpenCLI daemon 未运行；抓取时会尝试唤醒。"
+    if "Extension: connected" in output:
+        return True, f"已连接；窗口模式 {settings.opencli_window_mode or 'default'}，preflight {'开启' if settings.opencli_preflight_enabled else '关闭'}。"
+    return False, output or "OpenCLI daemon 已运行，但 Chrome 扩展未连接。"
+
+
+def _command_version(command: list[str]) -> tuple[bool, str]:
     try:
         completed = subprocess.run(
-            ["python", "-m", module, "--version"],
+            command,
             capture_output=True,
             text=True,
             timeout=10,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from datetime import datetime, time, timezone
 from pathlib import Path
@@ -12,6 +11,7 @@ import httpx
 
 from app.config import settings
 from app.db import get_connection, now_iso, row_to_dict
+from app.opencli_runtime import opencli_path, opencli_window_args, prepare_opencli_browser
 from app.scoring import interview_confidence, people_signals_for_video, priority_score
 from app.summaries import build_discovery_summary, looks_ai_related
 
@@ -85,8 +85,9 @@ def sync_bilibili(limit_per_query: int = 5, published_after: str | None = None, 
 
 def fetch_bilibili_subtitle_segments(bvid: str) -> list[dict]:
     opencli = _require_opencli()
+    prepare_opencli_browser(opencli, f"https://www.bilibili.com/video/{bvid}")
     completed = subprocess.run(
-        [opencli, "bilibili", "subtitle", bvid, "--format", "json"],
+        [opencli, "bilibili", "subtitle", bvid, "--format", "json", *_opencli_window_args()],
         check=True,
         capture_output=True,
         text=True,
@@ -141,8 +142,10 @@ def download_bilibili_authorized(video_id: int, bvid: str, authorization_note: s
         _bilibili_quality(quality),
         "--format",
         "json",
+        *_opencli_window_args(),
     ]
     try:
+        prepare_opencli_browser(opencli, f"https://www.bilibili.com/video/{bvid}")
         completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=60 * 60)
         log = "\n".join(part for part in [completed.stdout, completed.stderr] if part)
         output_path = _find_downloaded_media(output_dir)
@@ -151,10 +154,15 @@ def download_bilibili_authorized(video_id: int, bvid: str, authorization_note: s
         status = "completed"
         message = "B站视频已下载为本地素材。"
     except Exception as exc:
-        log = getattr(exc, "stderr", "") or str(exc)
-        output_path = ""
-        status = "failed"
-        message = str(exc)
+        log = _exception_log(exc)
+        output_path = _find_downloaded_media(output_dir)
+        if output_path and "Download complete" in log:
+            status = "completed"
+            message = "B站视频已下载为本地素材；下载工具返回警告，已保留日志。"
+        else:
+            output_path = ""
+            status = "failed"
+            message = str(exc)
 
     with get_connection() as conn:
         conn.execute(
@@ -180,8 +188,21 @@ def download_bilibili_authorized(video_id: int, bvid: str, authorization_note: s
 
 
 def _run_opencli_search(opencli: str, query: str, limit: int) -> list[dict]:
+    prepare_opencli_browser(opencli, "https://www.bilibili.com")
     completed = subprocess.run(
-        [opencli, "bilibili", "search", query, "--type", "video", "--limit", str(min(limit, 12)), "--format", "json"],
+        [
+            opencli,
+            "bilibili",
+            "search",
+            query,
+            "--type",
+            "video",
+            "--limit",
+            str(min(limit, 12)),
+            "--format",
+            "json",
+            *_opencli_window_args(),
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -192,8 +213,21 @@ def _run_opencli_search(opencli: str, query: str, limit: int) -> list[dict]:
 
 
 def _run_opencli_user_videos(opencli: str, uid: str, limit: int) -> list[dict]:
+    prepare_opencli_browser(opencli, f"https://space.bilibili.com/{uid}/video")
     completed = subprocess.run(
-        [opencli, "bilibili", "user-videos", uid, "--limit", str(min(limit, 12)), "--order", "pubdate", "--format", "json"],
+        [
+            opencli,
+            "bilibili",
+            "user-videos",
+            uid,
+            "--limit",
+            str(min(limit, 12)),
+            "--order",
+            "pubdate",
+            "--format",
+            "json",
+            *_opencli_window_args(),
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -380,7 +414,11 @@ def _seconds_from_bilibili_time(value: object) -> float:
 
 
 def _opencli_path() -> str:
-    return shutil.which(settings.opencli_path) or shutil.which("opencli") or ""
+    return opencli_path()
+
+
+def _opencli_window_args() -> list[str]:
+    return opencli_window_args()
 
 
 def _require_opencli() -> str:
@@ -398,7 +436,25 @@ def _bilibili_quality(quality: str) -> str:
 
 def _find_downloaded_media(output_dir: Path) -> str:
     files = sorted(
-        [path for path in output_dir.rglob("*") if path.is_file() and path.suffix.lower() in MEDIA_SUFFIXES],
+        [path for path in output_dir.rglob("*") if _is_final_media_file(path)],
         key=lambda path: path.stat().st_mtime,
     )
     return str(files[-1]) if files else ""
+
+
+def _is_final_media_file(path: Path) -> bool:
+    if not path.is_file() or path.suffix.lower() not in MEDIA_SUFFIXES:
+        return False
+    name = path.name
+    if name.endswith(".part") or ".temp." in name:
+        return False
+    if re.search(r"\.f\d+\.", name):
+        return False
+    return True
+
+
+def _exception_log(exc: Exception) -> str:
+    stdout = str(getattr(exc, "stdout", "") or "")
+    stderr = str(getattr(exc, "stderr", "") or "")
+    message = str(exc)
+    return "\n".join(part for part in [stdout, stderr, message] if part)

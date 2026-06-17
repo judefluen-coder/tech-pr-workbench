@@ -44,9 +44,7 @@ def run_authorized_download(video_id: int, authorization_note: str, quality: str
     slug = _slugify(video["title"])[:80] or f"video-{video_id}"
     output_template = str(settings.download_dir / f"{video_id}-{slug}.%(ext)s")
     command = [
-        sys.executable,
-        "-m",
-        "yt_dlp",
+        *_ytdlp_command(),
         "--newline",
         "--no-playlist",
         "--merge-output-format",
@@ -128,11 +126,19 @@ def _add_js_runtime(command: list[str]) -> None:
         command.extend(["--js-runtimes", f"node:{node}"])
 
 
+def _ytdlp_command() -> list[str]:
+    configured = settings.ytdlp_path.strip()
+    if configured:
+        resolved = shutil.which(configured)
+        if resolved:
+            return [resolved]
+        return [configured]
+    return [sys.executable, "-m", "yt_dlp"]
+
+
 def _try_download_subtitles(video_id: int, url: str, output_template: str) -> tuple[dict[str, str], str]:
     command = [
-        sys.executable,
-        "-m",
-        "yt_dlp",
+        *_ytdlp_command(),
         "--newline",
         "--skip-download",
         "--no-playlist",
