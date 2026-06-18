@@ -175,10 +175,14 @@ LOCAL_ASR_ENABLED=false
 DOWNLOAD_ENGINE=yt-dlp
 LOCAL_YTDLP_DISCOVERY=true
 OPENCLI_DISCOVERY_ENABLED=true
+OPENCLI_WINDOW_MODE=background
+OPENCLI_PREFLIGHT_ENABLED=false
 BILIBILI_DISCOVERY_ENABLED=true
 ```
 
 建议第一步先不配置 OpenAI。需要更稳定的 YouTube 发现结果时，再配置 `YOUTUBE_API_KEY`。
+
+`OPENCLI_WINDOW_MODE=background` 是默认推荐值：抓取时不会抢走当前工作台页面。只有在调试 opencli 浏览器插件连接问题时，才建议临时改成 `foreground` 并开启 `OPENCLI_PREFLIGHT_ENABLED=true`。
 
 如果确实需要 OpenAI 作为云端转写/翻译兜底：
 

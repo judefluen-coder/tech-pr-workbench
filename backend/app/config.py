@@ -75,7 +75,7 @@ class Settings:
 
     @property
     def opencli_window_mode(self) -> str:
-        raw = os.getenv("OPENCLI_WINDOW_MODE", "foreground").strip().lower()
+        raw = os.getenv("OPENCLI_WINDOW_MODE", "background").strip().lower()
         if raw in {"", "0", "false", "none", "off"}:
             return ""
         if raw in {"foreground", "background"}:
@@ -84,7 +84,7 @@ class Settings:
 
     @property
     def opencli_preflight_enabled(self) -> bool:
-        return _as_bool(os.getenv("OPENCLI_PREFLIGHT_ENABLED"), True)
+        return _as_bool(os.getenv("OPENCLI_PREFLIGHT_ENABLED"), False)
 
     @property
     def bilibili_discovery_enabled(self) -> bool:

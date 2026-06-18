@@ -7,6 +7,21 @@ class Completed:
     stdout = "[]"
 
 
+def test_opencli_discovery_defaults_to_background_window(monkeypatch) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **_: object) -> Completed:
+        commands.append(command)
+        return Completed()
+
+    monkeypatch.delenv("OPENCLI_WINDOW_MODE", raising=False)
+    monkeypatch.setenv("OPENCLI_PREFLIGHT_ENABLED", "false")
+    monkeypatch.setattr(youtube.subprocess, "run", fake_run)
+
+    assert youtube._run_opencli_youtube_search("opencli", "AI interview", 1) == []
+    assert commands[0][-2:] == ["--window", "background"]
+
+
 def test_bilibili_discovery_uses_foreground_window(monkeypatch) -> None:
     commands: list[list[str]] = []
 
