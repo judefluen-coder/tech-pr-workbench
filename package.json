@@ -7,8 +7,9 @@
     "dev": "node scripts/dev.mjs",
     "backend": "uv run --project backend uvicorn --app-dir backend app.main:app --reload --host 127.0.0.1 --port 8000",
     "frontend": "npm run dev --prefix frontend",
+    "test:setup": "node --test scripts/*.test.mjs",
     "test:backend": "uv run --project backend pytest",
     "build:frontend": "npm run build --prefix frontend",
-    "test": "npm run test:backend && npm run build:frontend"
+    "test": "npm run test:setup && npm run test:backend && npm run build:frontend"
   }
 }

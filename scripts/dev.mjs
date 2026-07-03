@@ -50,8 +50,16 @@ function commandCheck(cmd, versionArgs = ["--version"]) {
   };
 }
 
-function requireCommand(label, cmd, installHint, versionArgs = ["--version"]) {
+function requirementCheck(cmd, versionArgs = ["--version"], validate = null) {
   const result = commandCheck(cmd, versionArgs);
+  if (result.ok && validate && !validate(result.output)) {
+    return { ...result, ok: false };
+  }
+  return result;
+}
+
+function requireCommand(label, cmd, installHint, versionArgs = ["--version"], validate = null) {
+  const result = requirementCheck(cmd, versionArgs, validate);
   if (!result.ok) {
     console.error(`Missing ${label}. ${installHint}`);
     process.exit(1);
@@ -77,16 +85,29 @@ function install() {
 function doctor({ strict = false } = {}) {
   const env = readEnvConfig();
   const opencliCommand = configuredValue(env, "OPENCLI_PATH", "opencli");
+  const nodeHint = "Install Node.js >=20.19.0 or >=22.12.0 first. macOS: brew install node";
   const required = [
-    ["Node.js", command("node"), "Install Node.js 20+ first. macOS: brew install node", ["--version"]],
+    ["Node.js", command("node"), nodeHint, ["--version"], nodeVersionSupported],
     ["npm", command("npm"), "Install npm with Node.js first.", ["--version"]],
     ["uv", "uv", "Install uv first. macOS: brew install uv", ["--version"]],
-    ["FFmpeg", "ffmpeg", "Install FFmpeg first. macOS: brew install ffmpeg", ["-version"]],
   ];
   console.log("\nDependency check");
   console.log("----------------");
-  for (const [label, cmd, hint, versionArgs] of required) {
-    const result = strict ? requireCommand(label, cmd, hint, versionArgs) : commandCheck(cmd, versionArgs);
+  for (const [label, cmd, hint, versionArgs, validate] of required) {
+    const result = strict ? requireCommand(label, cmd, hint, versionArgs, validate) : requirementCheck(cmd, versionArgs, validate);
+    console.log(`${result.ok ? "OK " : "NO "} ${label}${result.output ? ` - ${result.output}` : ""}`);
+    if (!result.ok) {
+      console.log(`    ${hint}`);
+    }
+  }
+
+  const mediaTools = [
+    ["FFmpeg", "ffmpeg", "Required for reliable YouTube merging, audio extraction, and clip export. macOS: brew install ffmpeg", ["-version"]],
+  ];
+  console.log("\nMedia tools");
+  console.log("-----------");
+  for (const [label, cmd, hint, versionArgs] of mediaTools) {
+    const result = commandCheck(cmd, versionArgs);
     console.log(`${result.ok ? "OK " : "NO "} ${label}${result.output ? ` - ${result.output}` : ""}`);
     if (!result.ok) {
       console.log(`    ${hint}`);
@@ -119,6 +140,17 @@ function doctor({ strict = false } = {}) {
   console.log("- faster-whisper, unless users explicitly install backend[local-asr].");
   console.log("- XiaDown, because it is an external companion downloader, not a built-in engine.");
   console.log("- Argos language model may download on first translation when ARGOS_AUTO_INSTALL=true.");
+}
+
+function nodeVersionSupported(output) {
+  const match = output.match(/v?(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (major > 22) return true;
+  if (major === 22) return minor >= 12;
+  if (major === 20) return minor >= 19;
+  return false;
 }
 
 function startProcess(label, cmd, cmdArgs) {

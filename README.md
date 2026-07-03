@@ -84,9 +84,12 @@ npm run dev
 
 基础依赖：
 
-- Node.js 20+
+- Node.js >=20.19.0 或 >=22.12.0
 - uv
-- FFmpeg
+
+媒体功能依赖：
+
+- FFmpeg：用于稳定合并 YouTube 音视频、抽音频和导出剪辑。缺失时仍可安装并启动项目，下载会尝试单文件格式，但能力会受限。
 
 可选依赖：
 
@@ -114,9 +117,9 @@ brew install node uv ffmpeg
 
 用户需要自己先准备：
 
-- Node.js / npm
+- Node.js / npm：Node 需要 >=20.19.0 或 >=22.12.0
 - uv
-- FFmpeg
+- FFmpeg：建议安装；缺失时 `npm run setup` 不再中断，但视频下载合并、抽音频和导出会受限
 
 可选增强不会自动安装：
 
@@ -134,6 +137,8 @@ npm run doctor
 ```
 
 它会检查基础依赖，并提示哪些可选工具缺失以及影响。
+
+`npm run setup` 会在缺少 FFmpeg 时继续安装项目依赖；这是为了让干净机器先把应用跑起来。真正处理视频前仍建议安装 FFmpeg。
 
 如果对方准备把 GitHub 链接丢给 Codex、Claude Code、Cursor 等本地 coding agent，让大模型帮忙安装，请看 [Setup With A Coding Agent](docs/AI_AGENT_SETUP.md)。里面有可直接复制的提示词，以及哪些依赖能自动装、哪些需要用户自己提供授权或 API key。
 
