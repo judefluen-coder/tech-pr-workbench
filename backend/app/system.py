@@ -20,7 +20,7 @@ def system_status() -> dict:
         "youtube_api": {
             "ok": bool(settings.youtube_api_key),
             "label": "YouTube Data API",
-            "message": "已配置，可用官方免费配额发现公开视频。" if settings.youtube_api_key else "未配置，将优先用本机 yt-dlp 搜索。",
+            "message": "已配置，可用官方免费配额发现公开视频。" if settings.youtube_api_key else "未配置，将依次尝试 opencli 和本机 yt-dlp 搜索。",
         },
         "yt_dlp": {
             "ok": yt_dlp_ok,
@@ -35,7 +35,7 @@ def system_status() -> dict:
         "ffmpeg": {
             "ok": bool(ffmpeg_path),
             "label": "FFmpeg",
-            "message": ffmpeg_path or "未安装，无法抽音频和转码。",
+            "message": ffmpeg_path or "未安装，下载会尝试单文件格式，但抽音频、合并和导出视频会受限。",
         },
         "argos": {
             "ok": argos_ok,

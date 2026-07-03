@@ -45,9 +45,10 @@ npm run dev
 
 These must exist on the user's computer before the app can fully run:
 
-- Node.js / npm
+- Node.js / npm: Node must be >=20.19.0 or >=22.12.0
 - uv
-- FFmpeg
+
+Media features also need FFmpeg for reliable YouTube audio/video merging, audio extraction, and clip export. `npm run setup` can continue without FFmpeg so the app can start, but real video processing will be degraded until FFmpeg is installed.
 
 On macOS, a coding agent can usually install them with Homebrew:
 
@@ -132,7 +133,7 @@ https://github.com/arnoldhao/xiadown
 
 1. Clone the repo.
 2. Run `npm run doctor`.
-3. Install missing required dependencies.
+3. Install missing required dependencies, and install FFmpeg before real video processing.
 4. Run `npm run setup`.
 5. Run `npm run test`.
 6. Run `npm run dev`.
