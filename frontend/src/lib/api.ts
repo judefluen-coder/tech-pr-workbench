@@ -1,4 +1,4 @@
-import type { AutomationResult, ClipMark, ClipPayload, ClipRenderResult, DailyReport, DashboardData, Job, Person, SystemStatus, Video, VideoDetail, VideoStatus } from "../types";
+import type { AutomationResult, ClipMark, ClipPayload, DailyReport, DashboardData, Job, Person, SystemStatus, Video, VideoDetail, VideoStatus } from "../types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -23,7 +23,9 @@ export const api = {
   },
   runDaily: (payload: { date?: string; start_date?: string; end_date?: string; limit_per_query?: number } = {}) =>
     request<DailyReport>("/api/daily/run", { method: "POST", body: JSON.stringify(payload) }),
+  jobs: () => request<Job[]>("/api/jobs?limit=200"),
   job: (id: number) => request<Job>(`/api/jobs/${id}`),
+  retryJob: (id: number) => request<Job>(`/api/jobs/${id}/retry`, { method: "POST" }),
   dashboard: () => request<DashboardData>("/api/dashboard"),
   systemStatus: () => request<SystemStatus>("/api/system/status"),
   runAutomation: (payload: { days_back: number; limit_per_query: number; shortlist_threshold: number; auto_download: boolean; authorization_note: string; auto_transcribe: boolean }) =>
@@ -44,12 +46,12 @@ export const api = {
   downloadVideo: (id: number, payload: { authorization_note: string; quality: string; include_subtitles: boolean; include_thumbnail: boolean }) =>
     request<{ message: string }>(`/api/videos/${id}/download`, { method: "POST", body: JSON.stringify(payload) }),
   downloadTranslate: (id: number, payload: { authorization_note?: string; quality?: string } = {}) =>
-    request<{ job_id: number; video_id: number; message: string }>(`/api/items/${id}/download-translate`, { method: "POST", body: JSON.stringify(payload) }),
+    request<Job & { job_id: number; video_id: number }>(`/api/items/${id}/download-translate`, { method: "POST", body: JSON.stringify(payload) }),
   reprocessSubtitles: (id: number) =>
-    request<{ job_id: number; video_id: number; message: string }>(`/api/items/${id}/reprocess-subtitles`, { method: "POST" }),
+    request<Job & { job_id: number; video_id: number }>(`/api/items/${id}/reprocess-subtitles`, { method: "POST" }),
   clipPayload: (id: number) => request<ClipPayload>(`/api/items/${id}/clip`),
   renderClips: (id: number, payload: { destination: string; output_dir?: string; filename?: string; target_duration_seconds?: number; clip_status_filter?: string }) =>
-    request<ClipRenderResult>(`/api/items/${id}/render-clips`, { method: "POST", body: JSON.stringify(payload) }),
+    request<Job>(`/api/items/${id}/render-clips`, { method: "POST", body: JSON.stringify(payload) }),
   deleteClip: (id: number) => request<{ message: string }>(`/api/clip-marks/${id}`, { method: "DELETE" }),
   updateClip: (id: number, payload: Pick<ClipMark, "start_seconds" | "end_seconds" | "label" | "note" | "quote" | "status">) =>
     request<ClipMark>(`/api/clip-marks/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),

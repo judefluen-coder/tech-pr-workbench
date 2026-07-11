@@ -171,6 +171,21 @@ http://127.0.0.1:5173
 
 - Backend: `http://127.0.0.1:8000`
 - Frontend: `http://127.0.0.1:5173`
+- Worker: 持久处理下载、字幕重处理和视频导出任务
+
+浏览器刷新或服务重启不会丢失排队任务；中断的 worker 任务会在下次启动时自动恢复。失败任务可以在网页状态栏直接重试。
+
+## Docker Compose 模式
+
+已经安装 Docker Desktop 的机器可以只用 Docker Compose 启动可复现的网页、API 和 worker：
+
+```bash
+docker compose up --build
+```
+
+然后打开 `http://127.0.0.1:5173`。数据库、下载素材和导出文件都保存在仓库的 `storage/` 中；停止服务使用 `docker compose down`。
+
+Docker 模式适合在干净机器上快速部署，但容器不能直接调用宿主机的 OpenCLI 浏览器窗口，因此 YouTube 发现会使用 API key 或 yt-dlp 回退。需要 OpenCLI 可视浏览器抓取时，请使用上面的原生 `npm run dev` 模式。Docker 中的“下载文件夹/桌面”导出会映射到 `storage/Downloads/` 或 `storage/Desktop/`。
 
 ## 配置
 

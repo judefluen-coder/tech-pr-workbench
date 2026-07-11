@@ -1,0 +1,73 @@
+name: tech-pr-workbench
+
+x-backend-environment: &backend-environment
+  HOME: /app/storage
+  PYTHONUNBUFFERED: "1"
+  YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+  CLOUD_AI_ENABLED: ${CLOUD_AI_ENABLED:-false}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+  ARGOS_TRANSLATE_ENABLED: ${ARGOS_TRANSLATE_ENABLED:-true}
+  ARGOS_AUTO_INSTALL: ${ARGOS_AUTO_INSTALL:-true}
+  PLACEHOLDER_TRANSLATION_ENABLED: ${PLACEHOLDER_TRANSLATION_ENABLED:-false}
+  LOCAL_ASR_ENABLED: ${LOCAL_ASR_ENABLED:-false}
+  DOWNLOAD_ENGINE: ${DOWNLOAD_ENGINE:-yt-dlp}
+  YTDLP_PATH: yt-dlp
+  LOCAL_YTDLP_DISCOVERY: ${LOCAL_YTDLP_DISCOVERY:-true}
+  OPENCLI_DISCOVERY_ENABLED: "false"
+  BILIBILI_DISCOVERY_ENABLED: ${BILIBILI_DISCOVERY_ENABLED:-true}
+  BILIBILI_CHANNEL_UIDS: ${BILIBILI_CHANNEL_UIDS:-280780745,508452265,3546860354538082,13260662,73414544,673779175,478559884}
+  BILIBILI_CHANNEL_SCAN_LIMIT: ${BILIBILI_CHANNEL_SCAN_LIMIT:-2}
+  DOWNLOAD_DIR: /app/storage/downloads
+  TECH_PR_DB_PATH: /app/storage/app.db
+  TECH_PR_UPLOAD_DIR: /app/storage/uploads
+  TECH_PR_EXPORT_DIR: /app/storage/exports
+  TECH_PR_TMP_DIR: /app/storage/tmp
+  TECH_PR_DEFAULT_MEDIA_DELETE_AFTER_PROCESSING: ${TECH_PR_DEFAULT_MEDIA_DELETE_AFTER_PROCESSING:-true}
+  TECH_PR_WORKER_POLL_SECONDS: ${TECH_PR_WORKER_POLL_SECONDS:-0.8}
+
+services:
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      target: backend-runtime
+    environment: *backend-environment
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage:/app/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: backend-runtime
+    command: ["python", "-m", "app.worker"]
+    environment: *backend-environment
+    volumes:
+      - ./storage:/app/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

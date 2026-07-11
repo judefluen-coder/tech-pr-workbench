@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +21,7 @@ def render_clip_marks(
     filename: str = "",
     target_duration_seconds: float = 0,
     clip_status_filter: str = "all",
+    progress_callback: Callable[[int, str], None] | None = None,
 ) -> dict:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -160,11 +162,16 @@ def render_clip_marks(
                 "subtitle_mode": "burned_in" if subtitle_mode != "none" else "none",
             }
         )
+        if progress_callback:
+            progress = 10 + round(index / len(planned_marks) * 70)
+            progress_callback(progress, f"正在导出片段 {index}/{len(planned_marks)}")
 
     sequence_path = None
     sequence_url = ""
     saved_path = ""
     if exported:
+        if progress_callback:
+            progress_callback(90, "片段已生成，正在合成最终序列")
         scope_suffix = "-approved" if _normalized_clip_status_filter(clip_status_filter) == "approved" else ""
         duration_suffix = f"-{int(target_duration_seconds)}s" if target_duration_seconds > 0 else ""
         sequence_path = output_dir / f"sequence{scope_suffix}{duration_suffix}.mp4"

@@ -36,9 +36,9 @@ import { clipSequenceFocusSelectors } from "./lib/clipSequenceFocus";
 import { resolveClipEditShortcut } from "./lib/clipShortcuts";
 import { buildManualClipValidation, type ManualClipValidation } from "./lib/clipValidation";
 import { formatDate, formatDuration, formatNumber, formatTimecode, statusLabel } from "./lib/format";
+import { buildJobState, isActiveJobStatus, jobResult, jobVideoId } from "./lib/jobState";
 import type { ClipMark, ClipPayload, ClipRenderResult, DailyReport, Job, MediaAsset, SourceRun, Transcript, Video } from "./types";
 
-const PROCESSING_STATUSES = new Set(["queued", "running"]);
 const VIDEO_PROCESSING_STATUSES = new Set(["downloading", "subtitle_fetching", "transcribing", "translating"]);
 const EXPORT_VERSION_PRESETS = [
   { label: "完整序列", detail: "导出全部片段", target: 0 },
@@ -138,6 +138,7 @@ type ExportPreflightActions = Partial<Record<string, ExportPreflightAction>>;
 
 function App() {
   const defaultRange = useMemo(() => defaultBeijingRange(), []);
+  const dailyRequestIdRef = useRef(0);
   const [startDate, setStartDate] = useState(defaultRange.start);
   const [endDate, setEndDate] = useState(defaultRange.end);
   const [report, setReport] = useState<DailyReport | null>(null);
@@ -145,28 +146,46 @@ function App() {
   const [clip, setClip] = useState<ClipPayload | null>(null);
   const [jobs, setJobs] = useState<Record<number, Job>>({});
   const [jobIdsByVideo, setJobIdsByVideo] = useState<Record<number, number>>({});
+  const [latestJobIdsByVideo, setLatestJobIdsByVideo] = useState<Record<number, number>>({});
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [runningDaily, setRunningDaily] = useState(false);
   const [toast, setToast] = useState("");
 
   const loadDaily = async (range = { start: startDate, end: endDate }) => {
+    const requestId = ++dailyRequestIdRef.current;
     setLoading(true);
     try {
       const next = await api.daily({ start_date: range.start, end_date: range.end });
+      if (requestId !== dailyRequestIdRef.current) return;
       setReport(next);
       const selectedStillVisible = next.items.some((item) => item.id === selectedId);
       if (!selectedStillVisible) setSelectedId(next.items[0]?.id ?? null);
     } catch (error) {
+      if (requestId !== dailyRequestIdRef.current) return;
       setToast(readError(error, "日报加载失败"));
     } finally {
-      setLoading(false);
+      if (requestId === dailyRequestIdRef.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadDaily({ start: startDate, end: endDate });
   }, [startDate, endDate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.jobs().then((records) => {
+      if (cancelled) return;
+      const state = buildJobState(records);
+      setJobs(state.jobs);
+      setJobIdsByVideo(state.activeJobIdsByVideo);
+      setLatestJobIdsByVideo(state.latestJobIdsByVideo);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedId) {
@@ -189,12 +208,13 @@ function App() {
           try {
             const job = await api.job(jobId);
             nextJobs[job.id] = job;
-            if (!PROCESSING_STATUSES.has(job.status)) {
+            setLatestJobIdsByVideo((current) => ({ ...current, [videoId]: job.id }));
+            if (!isActiveJobStatus(job.status)) {
               completedVideos.push(videoId);
               completedMessages.push(job.message || (job.status === "failed" ? "处理失败。" : "处理完成。"));
             }
           } catch {
-            completedVideos.push(videoId);
+            return;
           }
         }),
       );
@@ -227,6 +247,14 @@ function App() {
 
   const stats = useMemo(() => buildStats(report?.items ?? []), [report]);
 
+  const trackJob = (videoId: number, job: Job) => {
+    setJobs((current) => ({ ...current, [job.id]: job }));
+    setLatestJobIdsByVideo((current) => ({ ...current, [videoId]: job.id }));
+    if (isActiveJobStatus(job.status)) {
+      setJobIdsByVideo((current) => ({ ...current, [videoId]: job.id }));
+    }
+  };
+
   const runDaily = async () => {
     if (endDate < startDate) {
       setToast("结束日期不能早于开始日期。");
@@ -235,6 +263,7 @@ function App() {
     setRunningDaily(true);
     try {
       const next = await api.runDaily({ start_date: startDate, end_date: endDate, limit_per_query: 3 });
+      dailyRequestIdRef.current += 1;
       setReport(next);
       setToast("区间 AI 采访抓取完成。");
       if (next.items[0]) setSelectedId(next.items[0].id);
@@ -250,19 +279,8 @@ function App() {
     setToast("正在下载并翻译，完成后会出现在剪辑工作台。");
     try {
       const job = await api.downloadTranslate(video.id, { quality: "1080p" });
-      setJobIdsByVideo((current) => ({ ...current, [video.id]: job.job_id }));
-      setJobs((current) => ({
-        ...current,
-        [job.job_id]: {
-          id: job.job_id,
-          type: "download_translate",
-          status: "queued",
-          message: job.message,
-          payload: JSON.stringify({ video_id: video.id }),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      }));
+      trackJob(video.id, job);
+      setToast(job.message);
     } catch (error) {
       setToast(readError(error, "下载翻译失败"));
     }
@@ -273,26 +291,29 @@ function App() {
     setToast("正在重新处理已有字幕，不会重新下载视频。");
     try {
       const job = await api.reprocessSubtitles(video.id);
-      setJobIdsByVideo((current) => ({ ...current, [video.id]: job.job_id }));
-      setJobs((current) => ({
-        ...current,
-        [job.job_id]: {
-          id: job.job_id,
-          type: "subtitle_reprocess",
-          status: "queued",
-          message: job.message,
-          payload: JSON.stringify({ video_id: video.id }),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      }));
+      trackJob(video.id, job);
+      setToast(job.message);
     } catch (error) {
       setToast(readError(error, "字幕重新处理失败"));
     }
   };
 
+  const retryTrackedJob = async (job: Job) => {
+    const videoId = jobVideoId(job);
+    if (!videoId) return;
+    try {
+      const retried = await api.retryJob(job.id);
+      trackJob(videoId, retried);
+      setToast("失败任务已重新加入队列。");
+    } catch (error) {
+      setToast(readError(error, "任务重试失败"));
+    }
+  };
+
   const selectedVideo = (report?.items ?? []).find((item) => item.id === selectedId) ?? clip?.video ?? null;
   const activeJobId = selectedId ? jobIdsByVideo[selectedId] : undefined;
+  const latestJobId = selectedId ? latestJobIdsByVideo[selectedId] : undefined;
+  const selectedJob = latestJobId ? jobs[latestJobId] ?? null : null;
   const selectedProcessing = Boolean(activeJobId) || Boolean(selectedVideo && VIDEO_PROCESSING_STATUSES.has(selectedVideo.status));
 
   const selectVideo = (id: number, focusClip = false) => {
@@ -377,16 +398,18 @@ function App() {
         </div>
 
         <aside className="status-panel">
-          <TaskStatus selectedVideo={selectedVideo} jobs={jobs} activeJobId={activeJobId} />
+          <TaskStatus selectedVideo={selectedVideo} job={selectedJob} active={Boolean(activeJobId)} onRetry={retryTrackedJob} />
         </aside>
       </section>
 
       <ClipWorkspace
         clip={clip}
+        job={selectedJob}
         selectedVideo={selectedVideo}
         processing={selectedProcessing}
         onDownloadTranslate={startDownloadTranslate}
         onReprocessSubtitles={startSubtitleReprocess}
+        onJobQueued={trackJob}
         onRefresh={() => selectedId && api.clipPayload(selectedId).then(setClip)}
         onToast={setToast}
       />
@@ -456,8 +479,17 @@ function InterviewList(props: {
   );
 }
 
-function TaskStatus({ selectedVideo, jobs, activeJobId }: { selectedVideo: Video | null; jobs: Record<number, Job>; activeJobId?: number }) {
-  const job = activeJobId ? jobs[activeJobId] : undefined;
+function TaskStatus({
+  selectedVideo,
+  job,
+  active,
+  onRetry,
+}: {
+  selectedVideo: Video | null;
+  job: Job | null;
+  active: boolean;
+  onRetry: (job: Job) => void | Promise<void>;
+}) {
   if (!selectedVideo) {
     return (
       <div className="status-empty">
@@ -468,14 +500,22 @@ function TaskStatus({ selectedVideo, jobs, activeJobId }: { selectedVideo: Video
     );
   }
   const ready = selectedVideo.status === "clip_ready" || selectedVideo.status === "translated" || selectedVideo.status === "clipped" || selectedVideo.status === "exported";
+  const visibleJob = job && (active || job.status === "failed") ? job : null;
   return (
     <div className="task-card">
       <div className="task-head">
-        <StatusBadge status={job?.status ?? selectedVideo.status} />
+        <StatusBadge status={visibleJob?.status ?? selectedVideo.status} />
         <span>{selectedVideo.source_tier === "experimental" ? "实验源" : "稳定源"}</span>
       </div>
       <h2>{selectedVideo.title}</h2>
-      <p>{job?.message || selectedVideo.summary || "还没有任务。点击列表里的“下载并翻译”开始处理。"}</p>
+      <p>{visibleJob?.message || selectedVideo.summary || "还没有任务。点击列表里的“下载并翻译”开始处理。"}</p>
+      {visibleJob && active && <JobProgress job={visibleJob} />}
+      {visibleJob?.status === "failed" && (
+        <button className="job-retry" type="button" onClick={() => void onRetry(visibleJob)}>
+          <ArrowCounterClockwise size={16} />
+          重试失败任务
+        </button>
+      )}
       <div className="task-steps">
         <Step done={ready || selectedVideo.status !== "ready"} active={selectedVideo.status === "downloading"} label="下载视频" />
         <Step done={ready || selectedVideo.status === "subtitle_fetching" || selectedVideo.status === "translating"} active={selectedVideo.status === "subtitle_fetching"} label="拉取字幕" />
@@ -486,6 +526,21 @@ function TaskStatus({ selectedVideo, jobs, activeJobId }: { selectedVideo: Video
         <LinkSimple size={16} />
         打开原始视频
       </a>
+    </div>
+  );
+}
+
+function JobProgress({ job }: { job: Job }) {
+  const progress = clamp(job.progress || 0, 0, 100);
+  return (
+    <div className="job-progress">
+      <div className="job-progress-label">
+        <span>后台任务进度</span>
+        <strong>{progress}%</strong>
+      </div>
+      <div className="job-progress-track" role="progressbar" aria-label="后台任务进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+        <span className="job-progress-fill" style={{ width: `${progress}%` }} />
+      </div>
     </div>
   );
 }
@@ -541,18 +596,22 @@ function Thumbnail({ className, url }: { className: string; url: string }) {
 
 function ClipWorkspace({
   clip,
+  job,
   selectedVideo,
   processing,
   onDownloadTranslate,
   onReprocessSubtitles,
+  onJobQueued,
   onRefresh,
   onToast,
 }: {
   clip: ClipPayload | null;
+  job: Job | null;
   selectedVideo: Video | null;
   processing: boolean;
   onDownloadTranslate: (video: Video) => void;
   onReprocessSubtitles: (video: Video) => void;
+  onJobQueued: (videoId: number, job: Job) => void;
   onRefresh: () => void;
   onToast: (message: string) => void;
 }) {
@@ -564,7 +623,7 @@ function ClipWorkspace({
   const [mediaDuration, setMediaDuration] = useState(0);
   const [draftPreviewRange, setDraftPreviewRange] = useState<ClipPreviewRange | null>(null);
   const [reviewingClipId, setReviewingClipId] = useState<number | null>(null);
-  const [rendering, setRendering] = useState(false);
+  const [queueingRender, setQueueingRender] = useState(false);
   const [savingClip, setSavingClip] = useState(false);
   const [renderResult, setRenderResult] = useState<ClipRenderResult | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -577,6 +636,8 @@ function ClipWorkspace({
   const [bulkUpdatingStatus, setBulkUpdatingStatus] = useState<string | null>(null);
   const [sequenceFocusRequest, setSequenceFocusRequest] = useState<SequenceFocusRequest | null>(null);
   const [reorderingClipId, setReorderingClipId] = useState<number | null>(null);
+  const renderJob = job?.type === "render_clips" ? job : null;
+  const rendering = queueingRender || Boolean(renderJob && isActiveJobStatus(renderJob.status));
   const zh = clip?.transcripts.filter((item) => item.language === "zh") ?? [];
   const en = clip?.transcripts.filter((item) => item.language === "en") ?? [];
   const rows = buildTranscriptRows(zh, en);
@@ -627,6 +688,7 @@ function ClipWorkspace({
     setDraftPreviewRange(null);
     setReviewingClipId(null);
     setRenderResult(null);
+    setQueueingRender(false);
     setSavingClip(false);
     setUpdatingClipId(null);
     setReorderingClipId(null);
@@ -660,6 +722,14 @@ function ClipWorkspace({
     if (!reviewingClipId) return;
     if (!clipMarks.some((mark) => mark.id === reviewingClipId)) setReviewingClipId(null);
   }, [clipMarks, reviewingClipId]);
+
+  useEffect(() => {
+    if (renderJob?.status !== "completed") return;
+    const result = jobResult<ClipRenderResult>(renderJob);
+    if (!result?.sequence_path || result.sequence_path === renderResult?.sequence_path) return;
+    setRenderResult(result);
+    onRefresh();
+  }, [onRefresh, renderJob, renderResult?.sequence_path]);
 
   if (!video) {
     return (
@@ -1269,17 +1339,16 @@ function ClipWorkspace({
       onToast("请填写自定义保存文件夹路径。");
       return;
     }
-    setRendering(true);
+    setQueueingRender(true);
     try {
-      const result = await api.renderClips(video.id, exportOptions);
-      setRenderResult(result);
-      onToast(result.message);
+      const queued = await api.renderClips(video.id, exportOptions);
+      onJobQueued(video.id, queued);
+      onToast(queued.message);
       setExportDialogOpen(false);
-      onRefresh();
     } catch (error) {
       onToast(readError(error, "导出片段视频失败"));
     } finally {
-      setRendering(false);
+      setQueueingRender(false);
     }
   };
 
@@ -1536,6 +1605,19 @@ function ClipWorkspace({
           </button>
         </div>
       </div>
+
+      {renderJob && isActiveJobStatus(renderJob.status) && (
+        <div className="render-job-progress" role="status">
+          <div className="render-job-message">
+            <span>
+              <SpinnerGap size={16} className="spin" />
+              正在后台导出序列视频
+            </span>
+            <strong>{renderJob.message}</strong>
+          </div>
+          <JobProgress job={renderJob} />
+        </div>
+      )}
 
       <ClipCommandCenter
         canEdit={canEdit}

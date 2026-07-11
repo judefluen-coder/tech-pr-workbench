@@ -4,26 +4,26 @@ import csv
 import io
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.ai import transcribe_and_translate
 from app.automation import run_automation
-from app.clip_export import render_clip_marks
 from app.config import settings
 from app.daily import get_daily_report, run_daily_discovery
 from app.db import get_connection, init_db, now_iso, row_to_dict
 from app.downloads import list_download_tasks, run_authorized_download
 from app.exports import clip_marks_to_csv, segments_to_srt, segments_to_vtt
+from app.jobs import get_job, list_jobs, retry_job
+from app.render_jobs import create_render_clips_job
 from app.schemas import AutomationRequest, ClipMarkCreate, ClipMarkReorder, ClipMarkUpdate, DailyRunRequest, DownloadRequest, DownloadTranslateRequest, PersonCreate, RenderClipsRequest, VideoUpdate, YoutubeSyncRequest
 from app.seed import seed_people_if_empty
 from app.system import system_status
 from app.media import import_authorized_media
-from app.workflow import clip_payload, create_download_translate_job, create_subtitle_reprocess_job, get_job, media_asset_with_url, run_download_translate_job, run_subtitle_reprocess_job
+from app.workflow import clip_payload, create_download_translate_job, create_subtitle_reprocess_job, media_asset_with_url
 from app.youtube import sync_youtube
 
 VALID_STATUSES = {
@@ -122,12 +122,25 @@ async def daily_run(payload: DailyRunRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/jobs")
+def jobs_index(video_id: int | None = None, limit: int = Query(default=100, ge=1, le=500)) -> list[dict]:
+    return list_jobs(video_id=video_id, limit=limit)
+
+
 @app.get("/api/jobs/{job_id}")
 def job_detail(job_id: int) -> dict:
     try:
         return get_job(job_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/{job_id}/retry")
+def retry_job_endpoint(job_id: int) -> dict:
+    try:
+        return retry_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/people")
@@ -312,22 +325,20 @@ def download_video_endpoint(video_id: int, payload: DownloadRequest) -> dict:
 
 
 @app.post("/api/items/{video_id}/download-translate")
-def download_translate_endpoint(video_id: int, payload: DownloadTranslateRequest, background_tasks: BackgroundTasks) -> dict:
+def download_translate_endpoint(video_id: int, payload: DownloadTranslateRequest) -> dict:
     try:
         job = create_download_translate_job(video_id, payload.authorization_note, payload.quality)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    background_tasks.add_task(run_download_translate_job, job["job_id"], video_id, payload.authorization_note, payload.quality)
     return job
 
 
 @app.post("/api/items/{video_id}/reprocess-subtitles")
-def reprocess_subtitles_endpoint(video_id: int, background_tasks: BackgroundTasks) -> dict:
+def reprocess_subtitles_endpoint(video_id: int) -> dict:
     try:
         job = create_subtitle_reprocess_job(video_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    background_tasks.add_task(run_subtitle_reprocess_job, job["job_id"], video_id)
     return job
 
 
@@ -343,59 +354,9 @@ def item_clip(video_id: int) -> dict:
 def render_clips(video_id: int, payload: RenderClipsRequest | None = None) -> dict:
     payload = payload or RenderClipsRequest()
     try:
-        result = render_clip_marks(
-            video_id,
-            destination=payload.destination,
-            destination_dir=payload.output_dir,
-            filename=payload.filename,
-            target_duration_seconds=payload.target_duration_seconds,
-            clip_status_filter=payload.clip_status_filter,
-        )
-        _persist_exported_sequence_asset(video_id, result)
-        return result
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return create_render_clips_job(video_id, payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-def _persist_exported_sequence_asset(video_id: int, result: dict) -> None:
-    sequence_path = str(result.get("sequence_path") or "")
-    if not sequence_path:
-        return
-    timestamp = now_iso()
-    filename = Path(sequence_path).name
-    with get_connection() as conn:
-        existing = conn.execute(
-            """
-            SELECT id FROM media_assets
-            WHERE video_id = ? AND kind = 'exported_sequence' AND stored_path = ?
-            """,
-            (video_id, sequence_path),
-        ).fetchone()
-        if existing:
-            conn.execute(
-                """
-                UPDATE media_assets
-                SET original_filename = ?, authorization_note = ?, delete_after_processing = 0,
-                    processing_status = 'exported', created_at = ?
-                WHERE id = ?
-                """,
-                (filename, "本地剪辑导出的合成序列。", timestamp, existing["id"]),
-            )
-            return
-        conn.execute(
-            """
-            INSERT INTO media_assets (
-              video_id, kind, original_filename, stored_path, transcript_text,
-              authorization_note, delete_after_processing, processing_status, created_at
-            )
-            VALUES (?, 'exported_sequence', ?, ?, '', ?, 0, 'exported', ?)
-            """,
-            (video_id, filename, sequence_path, "本地剪辑导出的合成序列。", timestamp),
-        )
 
 
 @app.get("/api/download-tasks")

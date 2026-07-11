@@ -22,10 +22,10 @@ Authentication, billing, real-time collaboration, multi-track editing, complex t
    - Preserve clip order, review state, and video workflow status.
    - Verify the current clip review, preflight, export, and delivery workflow.
 
-2. **Local runtime architecture** — Planned
-   - Move long-running work to a persistent SQLite-backed worker.
-   - Restore queued/running jobs after browser or service restarts.
-   - Add retryable progress states and one-command local startup.
+2. **Local runtime architecture** — Complete
+   - Moved download, subtitle reprocessing, and rendering to a persistent SQLite-backed worker.
+   - Restore interrupted worker jobs after service restarts and hydrate active jobs after browser refresh.
+   - Added progress, retry, duplicate-job protection, one-command native startup, and Docker Compose configuration.
 
 3. **Publish-ready rough cuts** — Planned
    - Add 16:9 and 9:16 output profiles.

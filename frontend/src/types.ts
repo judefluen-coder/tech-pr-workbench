@@ -32,6 +32,9 @@ export interface Job {
   status: string;
   message: string;
   payload: string;
+  result: string;
+  progress: number;
+  attempts: number;
   created_at: string;
   updated_at: string;
 }

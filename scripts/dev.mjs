@@ -154,14 +154,26 @@ function nodeVersionSupported(output) {
 }
 
 function startProcess(label, cmd, cmdArgs) {
-  const child = spawn(cmd, cmdArgs, { cwd: root, stdio: "inherit" });
+  const child = spawn(cmd, cmdArgs, { cwd: root, stdio: "inherit", detached: process.platform !== "win32" });
   child.on("exit", (code) => {
-    if (code && !shuttingDown) {
-      console.error(`[${label}] exited with code ${code}`);
-      shutdown(code);
+    if (!shuttingDown) {
+      console.error(`[${label}] exited unexpectedly with code ${code ?? "unknown"}`);
+      shutdown(code || 1);
     }
   });
   return child;
+}
+
+function signalProcessTree(child, signal) {
+  try {
+    if (process.platform !== "win32" && child.pid) {
+      process.kill(-child.pid, signal);
+    } else {
+      child.kill(signal);
+    }
+  } catch {
+    // The process may already have exited while the other services stop.
+  }
 }
 
 let shuttingDown = false;
@@ -171,9 +183,12 @@ function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   for (const child of children) {
-    child.kill("SIGTERM");
+    signalProcessTree(child, "SIGTERM");
   }
-  setTimeout(() => process.exit(code), 300).unref();
+  setTimeout(() => {
+    for (const child of children) signalProcessTree(child, "SIGKILL");
+    process.exit(code);
+  }, 1500);
 }
 
 if (checkOnly) {
@@ -193,10 +208,12 @@ if (installOnly) {
 console.log("\nStarting Tech PR Workbench:");
 console.log("- Backend:  http://127.0.0.1:8000");
 console.log("- Frontend: http://127.0.0.1:5173");
-console.log("Press Ctrl+C to stop both processes.\n");
+console.log("- Worker:   persistent local task processor");
+console.log("Press Ctrl+C to stop all three processes.\n");
 
 children = [
   startProcess("backend", "uv", ["run", "--project", "backend", "uvicorn", "--app-dir", "backend", "app.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"]),
+  startProcess("worker", "uv", ["--directory", "backend", "run", "python", "-m", "app.worker"]),
   startProcess("frontend", command("npm"), ["run", "dev", "--prefix", "frontend"]),
 ];
 

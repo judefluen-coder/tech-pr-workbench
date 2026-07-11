@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
@@ -9,6 +8,7 @@ from app.bilibili import download_bilibili_authorized, fetch_bilibili_subtitle_s
 from app.config import settings
 from app.db import get_connection, now_iso, row_to_dict
 from app.downloads import find_downloaded_subtitles, run_authorized_download
+from app.jobs import enqueue_job, fail_job, update_job
 from app.scoring import people_signals_for_video, priority_score
 from app.summaries import build_transcript_summary
 
@@ -16,24 +16,17 @@ CLIP_MARK_ORDER_SQL = "position IS NULL, position, start_seconds, id"
 
 
 def create_download_translate_job(video_id: int, authorization_note: str = "", quality: str = "1080p") -> dict:
-    timestamp = now_iso()
     with get_connection() as conn:
-        video = conn.execute("SELECT id, title FROM videos WHERE id = ?", (video_id,)).fetchone()
-        if not video:
-            raise ValueError("视频不存在。")
-        cursor = conn.execute(
-            """
-            INSERT INTO jobs (type, status, message, payload, created_at, updated_at)
-            VALUES ('download_translate', 'queued', '已加入下载翻译队列', ?, ?, ?)
-            """,
-            (
-                json.dumps({"video_id": video_id, "quality": quality}, ensure_ascii=False),
-                timestamp,
-                timestamp,
-            ),
-        )
-        job_id = cursor.lastrowid
-    return {"job_id": job_id, "video_id": video_id, "message": "已开始下载并翻译，请稍等。"}
+        video = conn.execute("SELECT id FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not video:
+        raise ValueError("视频不存在。")
+    job = enqueue_job(
+        "download_translate",
+        {"video_id": video_id, "authorization_note": authorization_note, "quality": quality},
+        "已加入下载翻译队列",
+        dedupe_video_id=video_id,
+    )
+    return {**job, "job_id": job["id"], "video_id": video_id}
 
 
 def run_download_translate_job(job_id: int, video_id: int, authorization_note: str = "", quality: str = "1080p") -> None:
@@ -41,19 +34,19 @@ def run_download_translate_job(job_id: int, video_id: int, authorization_note: s
     try:
         video = _get_video(video_id)
         if _is_demo_video(video):
-            _update_job(job_id, "running", "这是演示候选，正在生成可试用字幕", video_id, "translating")
+            _update_job(job_id, "running", "这是演示候选，正在生成可试用字幕", video_id, "translating", 35)
             en_segments = _demo_segments(video)
             zh_segments = translate_segments_to_zh(en_segments)
             save_transcript_segments(video_id, en_segments, zh_segments, "demo_transcript", "demo_translation", "clip_ready")
             _finish_translated_video(video_id, zh_segments)
-            _update_job(job_id, "completed", "演示字幕已生成；真实下载需要有效原始视频链接", video_id, "clip_ready")
+            _update_job(job_id, "completed", "演示字幕已生成；真实下载需要有效原始视频链接", video_id, "clip_ready", 100)
             return
 
         if video.get("platform") == "bilibili":
             _run_bilibili_download_translate(job_id, video, note, quality)
             return
 
-        _update_job(job_id, "running", "正在下载原始视频和可用字幕", video_id, "downloading")
+        _update_job(job_id, "running", "正在下载原始视频和可用字幕", video_id, "downloading", 10)
         download = run_authorized_download(
             video_id=video_id,
             authorization_note=note,
@@ -64,21 +57,21 @@ def run_download_translate_job(job_id: int, video_id: int, authorization_note: s
 
         subtitles = download.get("subtitles", {})
         if subtitles.get("zh"):
-            _update_job(job_id, "running", "检测到中文字幕，正在直接导入", video_id, "subtitle_fetching")
+            _update_job(job_id, "running", "检测到中文字幕，正在直接导入", video_id, "subtitle_fetching", 75)
             zh_segments = _segments_from_subtitle(subtitles["zh"])
             en_segments = _segments_from_subtitle(subtitles.get("en", "")) if subtitles.get("en") else []
             save_transcript_segments(video_id, en_segments, zh_segments, "downloaded_subtitle", "downloaded_zh_subtitle", "clip_ready")
             _finish_translated_video(video_id, zh_segments)
-            _update_job(job_id, "completed", "已导入原中文字幕，可进入剪辑工作台", video_id, "clip_ready")
+            _update_job(job_id, "completed", "已导入原中文字幕，可进入剪辑工作台", video_id, "clip_ready", 100)
             return
 
         if subtitles.get("en"):
-            _update_job(job_id, "running", "检测到英文字幕，正在本地翻译为中文", video_id, "translating")
+            _update_job(job_id, "running", "检测到英文字幕，正在本地翻译为中文", video_id, "translating", 70)
             en_segments = _segments_from_subtitle(subtitles["en"])
             zh_segments = translate_segments_to_zh(en_segments)
             save_transcript_segments(video_id, en_segments, zh_segments, "downloaded_en_subtitle", "local_translation", "clip_ready")
             _finish_translated_video(video_id, zh_segments)
-            _update_job(job_id, "completed", "英文字幕已翻译为中文，可进入剪辑工作台", video_id, "clip_ready")
+            _update_job(job_id, "completed", "英文字幕已翻译为中文，可进入剪辑工作台", video_id, "clip_ready", 100)
             return
 
         if not settings.local_asr_enabled and not (settings.cloud_ai_enabled and settings.openai_api_key):
@@ -88,40 +81,33 @@ def run_download_translate_job(job_id: int, video_id: int, authorization_note: s
                 "视频已下载，但没有检测到可用字幕；请启用本地转写或手动导入字幕后再生成中文字幕。",
                 video_id,
                 "imported",
+                100,
             )
             return
 
-        _update_job(job_id, "running", "没有可用字幕，正在转写音频并翻译", video_id, "transcribing")
+        _update_job(job_id, "running", "没有可用字幕，正在转写音频并翻译", video_id, "transcribing", 65)
         result = transcribe_and_translate(video_id)
         if not result.get("ok"):
             raise RuntimeError(result.get("message", "转写翻译失败"))
         _promote_translated_to_clip_ready(video_id)
-        _update_job(job_id, "completed", "已完成转写和中文字幕，可进入剪辑工作台", video_id, "clip_ready")
+        _update_job(job_id, "completed", "已完成转写和中文字幕，可进入剪辑工作台", video_id, "clip_ready", 100)
     except Exception as exc:
         _mark_failed(job_id, video_id, str(exc))
 
 
 def create_subtitle_reprocess_job(video_id: int) -> dict:
-    timestamp = now_iso()
     with get_connection() as conn:
         video = conn.execute("SELECT id FROM videos WHERE id = ?", (video_id,)).fetchone()
-        if not video:
-            raise ValueError("视频不存在。")
-        cursor = conn.execute(
-            """
-            INSERT INTO jobs (type, status, message, payload, created_at, updated_at)
-            VALUES ('subtitle_reprocess', 'queued', '已加入字幕重处理队列', ?, ?, ?)
-            """,
-            (json.dumps({"video_id": video_id}, ensure_ascii=False), timestamp, timestamp),
-        )
-        job_id = cursor.lastrowid
-    return {"job_id": job_id, "video_id": video_id, "message": "已开始重新处理字幕。"}
+    if not video:
+        raise ValueError("视频不存在。")
+    job = enqueue_job("subtitle_reprocess", {"video_id": video_id}, "已加入字幕重处理队列", dedupe_video_id=video_id)
+    return {**job, "job_id": job["id"], "video_id": video_id}
 
 
 def run_subtitle_reprocess_job(job_id: int, video_id: int) -> None:
     try:
         video = _get_video(video_id)
-        _update_job(job_id, "running", "正在读取已有字幕并清理重复片段", video_id)
+        _update_job(job_id, "running", "正在读取已有字幕并清理重复片段", video_id, progress=15)
         subtitles = find_downloaded_subtitles(video_id)
 
         if subtitles.get("zh"):
@@ -131,14 +117,14 @@ def run_subtitle_reprocess_job(job_id: int, video_id: int) -> None:
             zh_source = "reprocessed_downloaded_zh_subtitle"
         elif subtitles.get("en"):
             en_segments = _segments_from_subtitle(subtitles["en"])
-            _update_job(job_id, "running", "字幕已清理，正在重新生成中文翻译", video_id)
+            _update_job(job_id, "running", "字幕已清理，正在重新生成中文翻译", video_id, progress=55)
             zh_segments = translate_segments_to_zh(en_segments)
             en_source = "reprocessed_downloaded_en_subtitle"
             zh_source = "reprocessed_local_translation"
         else:
             en_segments, zh_segments = _stored_transcript_segments(video_id)
             if en_segments:
-                _update_job(job_id, "running", "没有找到原字幕文件，正在根据已有英文字幕重新翻译", video_id)
+                _update_job(job_id, "running", "没有找到原字幕文件，正在根据已有英文字幕重新翻译", video_id, progress=55)
                 zh_segments = translate_segments_to_zh(en_segments)
                 en_source = "reprocessed_stored_transcript"
                 zh_source = "reprocessed_local_translation"
@@ -151,17 +137,9 @@ def run_subtitle_reprocess_job(job_id: int, video_id: int) -> None:
         final_status = _status_after_subtitle_reprocess(video_id, video.get("status", ""))
         save_transcript_segments(video_id, en_segments, zh_segments, en_source, zh_source, final_status)
         _finish_translated_video(video_id, zh_segments, final_status)
-        _update_job(job_id, "completed", f"字幕已重新处理：{len(zh_segments)} 条中文，{len(en_segments)} 条英文", video_id)
+        _update_job(job_id, "completed", f"字幕已重新处理：{len(zh_segments)} 条中文，{len(en_segments)} 条英文", video_id, progress=100)
     except Exception as exc:
         _mark_reprocess_failed(job_id, video_id, str(exc))
-
-
-def get_job(job_id: int) -> dict:
-    with get_connection() as conn:
-        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        if not row:
-            raise ValueError("任务不存在。")
-        return row_to_dict(row)
 
 
 def clip_payload(video_id: int) -> dict:
@@ -232,7 +210,7 @@ def _run_bilibili_download_translate(job_id: int, video: dict, note: str, qualit
         raise RuntimeError("B站视频缺少 BV 号，无法处理。")
 
     subtitle_error = ""
-    _update_job(job_id, "running", "正在拉取 B站中文字幕", video_id, "subtitle_fetching")
+    _update_job(job_id, "running", "正在拉取 B站中文字幕", video_id, "subtitle_fetching", 20)
     try:
         zh_segments = fetch_bilibili_subtitle_segments(bvid)
     except Exception as exc:
@@ -240,26 +218,26 @@ def _run_bilibili_download_translate(job_id: int, video: dict, note: str, qualit
         subtitle_error = str(exc)
 
     if zh_segments:
-        _update_job(job_id, "running", "已拉取 B站中文字幕，正在下载原始视频", video_id, "downloading")
+        _update_job(job_id, "running", "已拉取 B站中文字幕，正在下载原始视频", video_id, "downloading", 55)
         download_bilibili_authorized(video_id, bvid, note, quality)
         save_transcript_segments(video_id, [], zh_segments, "none", "bilibili_subtitle", "clip_ready")
         _finish_translated_video(video_id, zh_segments)
-        _update_job(job_id, "completed", "已下载 B站视频并拉取中文字幕，可进入剪辑工作台", video_id, "clip_ready")
+        _update_job(job_id, "completed", "已下载 B站视频并拉取中文字幕，可进入剪辑工作台", video_id, "clip_ready", 100)
         return
 
-    _update_job(job_id, "running", "没有检测到 B站字幕，正在下载原始视频", video_id, "downloading")
+    _update_job(job_id, "running", "没有检测到 B站字幕，正在下载原始视频", video_id, "downloading", 45)
     download_bilibili_authorized(video_id, bvid, note, quality)
 
     if not settings.local_asr_enabled and not (settings.cloud_ai_enabled and settings.openai_api_key):
         hint = f"字幕拉取失败：{subtitle_error}。" if subtitle_error else ""
         raise RuntimeError(f"{hint}视频已尝试下载，但没有可用字幕且未开启本地转写。请开启 LOCAL_ASR_ENABLED 或手动导入字幕。")
 
-    _update_job(job_id, "running", "已下载 B站视频，正在转写并生成中文字幕", video_id, "transcribing")
+    _update_job(job_id, "running", "已下载 B站视频，正在转写并生成中文字幕", video_id, "transcribing", 70)
     result = transcribe_and_translate(video_id)
     if not result.get("ok"):
         raise RuntimeError(result.get("message", "转写翻译失败"))
     _promote_translated_to_clip_ready(video_id)
-    _update_job(job_id, "completed", "B站视频已完成转写和中文字幕，可进入剪辑工作台", video_id, "clip_ready")
+    _update_job(job_id, "completed", "B站视频已完成转写和中文字幕，可进入剪辑工作台", video_id, "clip_ready", 100)
 
 
 def _bvid_from_video(video: dict) -> str:
@@ -346,13 +324,10 @@ def _people_signals_after_transcript(video_id: int) -> tuple[str, str, str, floa
     return matched_names, candidate_people, reason, score
 
 
-def _update_job(job_id: int, status: str, message: str, video_id: int, video_status: str | None = None) -> None:
+def _update_job(job_id: int, status: str, message: str, video_id: int, video_status: str | None = None, progress: int | None = None) -> None:
     timestamp = now_iso()
+    update_job(job_id, status, message, progress=progress)
     with get_connection() as conn:
-        conn.execute(
-            "UPDATE jobs SET status = ?, message = ?, updated_at = ? WHERE id = ?",
-            (status, message, timestamp, job_id),
-        )
         if video_status:
             conn.execute(
                 "UPDATE videos SET status = ?, last_error = '', updated_at = ? WHERE id = ?",
@@ -362,11 +337,8 @@ def _update_job(job_id: int, status: str, message: str, video_id: int, video_sta
 
 def _mark_failed(job_id: int, video_id: int, message: str) -> None:
     timestamp = now_iso()
+    fail_job(job_id, message)
     with get_connection() as conn:
-        conn.execute(
-            "UPDATE jobs SET status = 'failed', message = ?, updated_at = ? WHERE id = ?",
-            (message, timestamp, job_id),
-        )
         conn.execute(
             "UPDATE videos SET status = 'failed', last_error = ?, updated_at = ? WHERE id = ?",
             (message, timestamp, video_id),
@@ -375,11 +347,8 @@ def _mark_failed(job_id: int, video_id: int, message: str) -> None:
 
 def _mark_reprocess_failed(job_id: int, video_id: int, message: str) -> None:
     timestamp = now_iso()
+    fail_job(job_id, message)
     with get_connection() as conn:
-        conn.execute(
-            "UPDATE jobs SET status = 'failed', message = ?, updated_at = ? WHERE id = ?",
-            (message, timestamp, job_id),
-        )
         conn.execute(
             "UPDATE videos SET last_error = ?, updated_at = ? WHERE id = ?",
             (message, timestamp, video_id),

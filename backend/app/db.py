@@ -126,6 +126,9 @@ def init_db() -> None:
               status TEXT NOT NULL,
               message TEXT DEFAULT '',
               payload TEXT DEFAULT '{}',
+              result TEXT DEFAULT '{}',
+              progress INTEGER NOT NULL DEFAULT 0,
+              attempts INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
@@ -150,6 +153,9 @@ def init_db() -> None:
         _ensure_column(conn, "videos", "candidate_people", "TEXT DEFAULT ''")
         _ensure_column(conn, "videos", "people_match_reason", "TEXT DEFAULT ''")
         _ensure_column(conn, "clip_marks", "position", "INTEGER")
+        _ensure_column(conn, "jobs", "result", "TEXT DEFAULT '{}'")
+        _ensure_column(conn, "jobs", "progress", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0")
         _backfill_clip_positions(conn)
         _refresh_people_signals(conn)
 

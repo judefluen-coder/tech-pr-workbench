@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import subprocess
 import tempfile
@@ -95,6 +96,10 @@ Hello &amp; welcome
 
     response = client.post(f"/api/items/{video_id}/reprocess-subtitles")
     assert response.status_code == 200
+    from app.worker import run_worker_once
+
+    processed = run_worker_once()
+    assert processed and processed["id"] == response.json()["job_id"]
     job = client.get(f"/api/jobs/{response.json()['job_id']}").json()
     assert job["status"] == "completed"
 
@@ -285,7 +290,12 @@ def test_render_clips_registers_exported_sequence_asset() -> None:
         json={"destination": "custom", "output_dir": str(save_dir), "filename": "asset-test.mp4", "target_duration_seconds": 0, "clip_status_filter": "approved"},
     )
     assert render_response.status_code == 200
-    render_payload = render_response.json()
+    from app.worker import run_worker_once
+
+    processed = run_worker_once()
+    assert processed and processed["id"] == render_response.json()["id"]
+    assert processed["status"] == "completed"
+    render_payload = json.loads(processed["result"])
     assert render_payload["sequence_path"]
     assert render_payload["clip_status_filter"] == "approved"
     assert [clip["label"] for clip in render_payload["clips"]] == ["确认导出"]
