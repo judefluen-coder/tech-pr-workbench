@@ -5,24 +5,26 @@ import io
 import json
 from datetime import datetime, timezone
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.ai import transcribe_and_translate
 from app.automation import run_automation
-from app.clip_export import render_clip_marks
+from app.branding import import_brand_logo
 from app.config import settings
 from app.daily import get_daily_report, run_daily_discovery
 from app.db import get_connection, init_db, now_iso, row_to_dict
 from app.downloads import list_download_tasks, run_authorized_download
 from app.exports import clip_marks_to_csv, segments_to_srt, segments_to_vtt
-from app.schemas import AutomationRequest, ClipMarkCreate, DailyRunRequest, DownloadRequest, DownloadTranslateRequest, PersonCreate, RenderClipsRequest, VideoUpdate, YoutubeSyncRequest
+from app.jobs import get_job, list_jobs, retry_job
+from app.render_jobs import create_render_clips_job
+from app.schemas import AutomationRequest, ClipMarkCreate, ClipMarkReorder, ClipMarkUpdate, DailyRunRequest, DownloadRequest, DownloadTranslateRequest, PersonCreate, RenderClipsRequest, VideoUpdate, YoutubeSyncRequest
 from app.seed import seed_people_if_empty
 from app.system import system_status
 from app.media import import_authorized_media
-from app.workflow import clip_payload, create_download_translate_job, get_job, run_download_translate_job
+from app.workflow import clip_payload, create_download_translate_job, create_subtitle_reprocess_job, media_asset_with_url
 from app.youtube import sync_youtube
 
 VALID_STATUSES = {
@@ -43,6 +45,8 @@ VALID_STATUSES = {
     "clip_ready",
     "failed",
 }
+
+CLIP_MARK_ORDER_SQL = "position IS NULL, position, start_seconds, id"
 
 settings.ensure_dirs()
 app = FastAPI(title="科技采访 PR 工作台 API", version="0.1.0")
@@ -119,12 +123,25 @@ async def daily_run(payload: DailyRunRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/jobs")
+def jobs_index(video_id: int | None = None, limit: int = Query(default=100, ge=1, le=500)) -> list[dict]:
+    return list_jobs(video_id=video_id, limit=limit)
+
+
 @app.get("/api/jobs/{job_id}")
 def job_detail(job_id: int) -> dict:
     try:
         return get_job(job_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/{job_id}/retry")
+def retry_job_endpoint(job_id: int) -> dict:
+    try:
+        return retry_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/people")
@@ -223,11 +240,11 @@ def get_video(video_id: int) -> dict:
         ]
         clips = [
             row_to_dict(row)
-            for row in conn.execute("SELECT * FROM clip_marks WHERE video_id = ? ORDER BY start_seconds", (video_id,)).fetchall()
+            for row in conn.execute(f"SELECT * FROM clip_marks WHERE video_id = ? ORDER BY {CLIP_MARK_ORDER_SQL}", (video_id,)).fetchall()
         ]
         assets = [
-            row_to_dict(row)
-            for row in conn.execute("SELECT id, kind, original_filename, authorization_note, delete_after_processing, processing_status, created_at FROM media_assets WHERE video_id = ? ORDER BY id DESC", (video_id,)).fetchall()
+            media_asset_with_url(row_to_dict(row))
+            for row in conn.execute("SELECT * FROM media_assets WHERE video_id = ? ORDER BY id DESC", (video_id,)).fetchall()
         ]
     return {"video": row_to_dict(video), "transcripts": transcripts, "clip_marks": clips, "media_assets": assets}
 
@@ -309,12 +326,20 @@ def download_video_endpoint(video_id: int, payload: DownloadRequest) -> dict:
 
 
 @app.post("/api/items/{video_id}/download-translate")
-def download_translate_endpoint(video_id: int, payload: DownloadTranslateRequest, background_tasks: BackgroundTasks) -> dict:
+def download_translate_endpoint(video_id: int, payload: DownloadTranslateRequest) -> dict:
     try:
         job = create_download_translate_job(video_id, payload.authorization_note, payload.quality)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    background_tasks.add_task(run_download_translate_job, job["job_id"], video_id, payload.authorization_note, payload.quality)
+    return job
+
+
+@app.post("/api/items/{video_id}/reprocess-subtitles")
+def reprocess_subtitles_endpoint(video_id: int) -> dict:
+    try:
+        job = create_subtitle_reprocess_job(video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return job
 
 
@@ -326,17 +351,18 @@ def item_clip(video_id: int) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/api/items/{video_id}/brand-logo")
+async def upload_brand_logo(video_id: int, file: UploadFile = File(...)) -> dict:
+    return await import_brand_logo(video_id, file)
+
+
 @app.post("/api/items/{video_id}/render-clips")
 def render_clips(video_id: int, payload: RenderClipsRequest | None = None) -> dict:
     payload = payload or RenderClipsRequest()
     try:
-        return render_clip_marks(video_id, destination=payload.destination, destination_dir=payload.output_dir, filename=payload.filename)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return create_render_clips_job(video_id, payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/download-tasks")
@@ -353,10 +379,14 @@ def create_clip_mark(payload: ClipMarkCreate) -> dict:
         video = conn.execute("SELECT id FROM videos WHERE id = ?", (payload.video_id,)).fetchone()
         if not video:
             raise HTTPException(status_code=404, detail="视频不存在。")
+        next_position = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next_position FROM clip_marks WHERE video_id = ?",
+            (payload.video_id,),
+        ).fetchone()["next_position"]
         cursor = conn.execute(
             """
-            INSERT INTO clip_marks (video_id, start_seconds, end_seconds, label, note, quote, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO clip_marks (video_id, start_seconds, end_seconds, label, note, quote, position, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.video_id,
@@ -365,6 +395,7 @@ def create_clip_mark(payload: ClipMarkCreate) -> dict:
                 payload.label,
                 payload.note,
                 payload.quote,
+                next_position,
                 payload.status,
                 timestamp,
                 timestamp,
@@ -385,6 +416,62 @@ def delete_clip_mark(clip_mark_id: int) -> dict:
         if not remaining:
             conn.execute("UPDATE videos SET status = 'clip_ready', updated_at = ? WHERE id = ?", (now_iso(), mark["video_id"]))
     return {"message": "已从剪辑序列移除。"}
+
+
+@app.patch("/api/clip-marks/{clip_mark_id}")
+def update_clip_mark(clip_mark_id: int, payload: ClipMarkUpdate) -> dict:
+    if payload.end_seconds <= payload.start_seconds:
+        raise HTTPException(status_code=400, detail="结束时间必须大于开始时间。")
+    timestamp = now_iso()
+    with get_connection() as conn:
+        mark = conn.execute("SELECT * FROM clip_marks WHERE id = ?", (clip_mark_id,)).fetchone()
+        if not mark:
+            raise HTTPException(status_code=404, detail="剪辑片段不存在。")
+        conn.execute(
+            """
+            UPDATE clip_marks
+            SET start_seconds = ?, end_seconds = ?, label = ?, note = ?, quote = ?, status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                payload.start_seconds,
+                payload.end_seconds,
+                payload.label,
+                payload.note,
+                payload.quote,
+                payload.status,
+                timestamp,
+                clip_mark_id,
+            ),
+        )
+        conn.execute("UPDATE videos SET status = 'clipped', updated_at = ? WHERE id = ?", (timestamp, mark["video_id"]))
+        return row_to_dict(conn.execute("SELECT * FROM clip_marks WHERE id = ?", (clip_mark_id,)).fetchone())
+
+
+@app.post("/api/items/{video_id}/clip-order")
+def reorder_clip_marks(video_id: int, payload: ClipMarkReorder) -> dict:
+    submitted_ids = payload.clip_mark_ids
+    if len(submitted_ids) != len(set(submitted_ids)):
+        raise HTTPException(status_code=400, detail="剪辑序列包含重复片段。")
+    timestamp = now_iso()
+    with get_connection() as conn:
+        video = conn.execute("SELECT id FROM videos WHERE id = ?", (video_id,)).fetchone()
+        if not video:
+            raise HTTPException(status_code=404, detail="视频不存在。")
+        existing_ids = [
+            row["id"]
+            for row in conn.execute(f"SELECT id FROM clip_marks WHERE video_id = ? ORDER BY {CLIP_MARK_ORDER_SQL}", (video_id,)).fetchall()
+        ]
+        if set(submitted_ids) != set(existing_ids):
+            raise HTTPException(status_code=400, detail="排序列表必须包含当前视频的全部片段。")
+        for position, clip_mark_id in enumerate(submitted_ids):
+            conn.execute("UPDATE clip_marks SET position = ?, updated_at = ? WHERE id = ?", (position, timestamp, clip_mark_id))
+        conn.execute("UPDATE videos SET status = 'clipped', updated_at = ? WHERE id = ?", (timestamp, video_id))
+        clips = [
+            row_to_dict(row)
+            for row in conn.execute(f"SELECT * FROM clip_marks WHERE video_id = ? ORDER BY {CLIP_MARK_ORDER_SQL}", (video_id,)).fetchall()
+        ]
+    return {"message": "剪辑序列顺序已更新。", "clip_marks": clips}
 
 
 @app.get("/api/videos/{video_id}/export")
@@ -413,7 +500,7 @@ def export_video(
         else:
             clips = [
                 row_to_dict(row)
-                for row in conn.execute("SELECT * FROM clip_marks WHERE video_id = ? ORDER BY start_seconds", (video_id,)).fetchall()
+                for row in conn.execute(f"SELECT * FROM clip_marks WHERE video_id = ? ORDER BY {CLIP_MARK_ORDER_SQL}", (video_id,)).fetchall()
             ]
             content = clip_marks_to_csv(clips)
             media_type = "text/csv; charset=utf-8"

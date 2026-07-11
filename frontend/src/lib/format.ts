@@ -42,6 +42,9 @@ export function statusLabel(status: string): string {
     transcribing: "转写中",
     translating: "翻译中",
     clip_ready: "可剪辑",
+    queued: "排队中",
+    running: "处理中",
+    completed: "已完成",
     failed: "失败",
   };
   return labels[status] ?? status;

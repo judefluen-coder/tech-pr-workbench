@@ -12,6 +12,7 @@ def test_bilibili_download_accepts_completed_file_after_tool_warning(monkeypatch
     monkeypatch.setenv("TECH_PR_DB_PATH", str(tmp_path / "app.db"))
     monkeypatch.setenv("DOWNLOAD_DIR", str(tmp_path / "downloads"))
     monkeypatch.setenv("OPENCLI_PREFLIGHT_ENABLED", "false")
+    monkeypatch.setenv("OPENCLI_WINDOW_MODE", "foreground")
     init_db()
 
     timestamp = now_iso()

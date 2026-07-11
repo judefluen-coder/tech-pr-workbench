@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.clip_export import _clip_subtitle_segments, _copy_sequence_to_destination, _escape_filter_path
+from app.clip_export import _clip_subtitle_segments, _copy_sequence_to_destination, _escape_filter_path, _filter_export_marks, _plan_export_marks
 
 
 def test_clip_subtitle_segments_are_clamped_to_clip_time() -> None:
@@ -22,6 +22,38 @@ def test_clip_subtitle_segments_are_clamped_to_clip_time() -> None:
 
 def test_escape_filter_path_escapes_ffmpeg_filter_delimiters() -> None:
     assert _escape_filter_path(Path("/tmp/a:b'srt")) == "/tmp/a\\:b\\'srt"
+
+
+def test_plan_export_marks_trims_to_target_duration() -> None:
+    marks = [
+        {"id": 1, "start_seconds": 10, "end_seconds": 30, "label": "first"},
+        {"id": 2, "start_seconds": 60, "end_seconds": 95, "label": "second"},
+        {"id": 3, "start_seconds": 120, "end_seconds": 140, "label": "third"},
+    ]
+
+    planned = _plan_export_marks(marks, 30)
+
+    assert [mark["id"] for mark in planned] == [1, 2]
+    assert planned[0]["start_seconds"] == 10
+    assert planned[0]["end_seconds"] == 30
+    assert planned[1]["start_seconds"] == 60
+    assert planned[1]["end_seconds"] == 70
+
+
+def test_plan_export_marks_keeps_full_sequence_without_target_duration() -> None:
+    marks = [{"id": 1, "start_seconds": 0, "end_seconds": 5}]
+    assert _plan_export_marks(marks, 0) == marks
+
+
+def test_filter_export_marks_can_keep_only_approved_clips() -> None:
+    marks = [
+        {"id": 1, "status": "draft"},
+        {"id": 2, "status": "approved"},
+        {"id": 3, "status": "ready"},
+    ]
+
+    assert [mark["id"] for mark in _filter_export_marks(marks, "approved")] == [2]
+    assert [mark["id"] for mark in _filter_export_marks(marks, "all")] == [1, 2, 3]
 
 
 def test_copy_sequence_to_custom_destination_dedupes_filename(tmp_path: Path) -> None:

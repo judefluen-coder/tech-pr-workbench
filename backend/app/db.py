@@ -113,6 +113,7 @@ def init_db() -> None:
               label TEXT NOT NULL,
               note TEXT DEFAULT '',
               quote TEXT DEFAULT '',
+              position INTEGER,
               status TEXT NOT NULL DEFAULT 'draft',
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL,
@@ -125,6 +126,9 @@ def init_db() -> None:
               status TEXT NOT NULL,
               message TEXT DEFAULT '',
               payload TEXT DEFAULT '{}',
+              result TEXT DEFAULT '{}',
+              progress INTEGER NOT NULL DEFAULT 0,
+              attempts INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
@@ -148,6 +152,11 @@ def init_db() -> None:
         _ensure_column(conn, "videos", "last_error", "TEXT DEFAULT ''")
         _ensure_column(conn, "videos", "candidate_people", "TEXT DEFAULT ''")
         _ensure_column(conn, "videos", "people_match_reason", "TEXT DEFAULT ''")
+        _ensure_column(conn, "clip_marks", "position", "INTEGER")
+        _ensure_column(conn, "jobs", "result", "TEXT DEFAULT '{}'")
+        _ensure_column(conn, "jobs", "progress", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0")
+        _backfill_clip_positions(conn)
         _refresh_people_signals(conn)
 
 
@@ -155,6 +164,22 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _backfill_clip_positions(conn: sqlite3.Connection) -> None:
+    video_ids = [
+        row["video_id"]
+        for row in conn.execute(
+            "SELECT DISTINCT video_id FROM clip_marks WHERE position IS NULL ORDER BY video_id",
+        ).fetchall()
+    ]
+    for video_id in video_ids:
+        rows = conn.execute(
+            "SELECT id FROM clip_marks WHERE video_id = ? ORDER BY start_seconds, id",
+            (video_id,),
+        ).fetchall()
+        for position, row in enumerate(rows):
+            conn.execute("UPDATE clip_marks SET position = ? WHERE id = ?", (position, row["id"]))
 
 
 def _refresh_people_signals(conn: sqlite3.Connection) -> None:

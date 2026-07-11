@@ -50,8 +50,16 @@ function commandCheck(cmd, versionArgs = ["--version"]) {
   };
 }
 
-function requireCommand(label, cmd, installHint, versionArgs = ["--version"]) {
+function requirementCheck(cmd, versionArgs = ["--version"], validate = null) {
   const result = commandCheck(cmd, versionArgs);
+  if (result.ok && validate && !validate(result.output)) {
+    return { ...result, ok: false };
+  }
+  return result;
+}
+
+function requireCommand(label, cmd, installHint, versionArgs = ["--version"], validate = null) {
+  const result = requirementCheck(cmd, versionArgs, validate);
   if (!result.ok) {
     console.error(`Missing ${label}. ${installHint}`);
     process.exit(1);
@@ -77,16 +85,29 @@ function install() {
 function doctor({ strict = false } = {}) {
   const env = readEnvConfig();
   const opencliCommand = configuredValue(env, "OPENCLI_PATH", "opencli");
+  const nodeHint = "Install Node.js >=20.19.0 or >=22.12.0 first. macOS: brew install node";
   const required = [
-    ["Node.js", command("node"), "Install Node.js 20+ first. macOS: brew install node", ["--version"]],
+    ["Node.js", command("node"), nodeHint, ["--version"], nodeVersionSupported],
     ["npm", command("npm"), "Install npm with Node.js first.", ["--version"]],
     ["uv", "uv", "Install uv first. macOS: brew install uv", ["--version"]],
-    ["FFmpeg", "ffmpeg", "Install FFmpeg first. macOS: brew install ffmpeg", ["-version"]],
   ];
   console.log("\nDependency check");
   console.log("----------------");
-  for (const [label, cmd, hint, versionArgs] of required) {
-    const result = strict ? requireCommand(label, cmd, hint, versionArgs) : commandCheck(cmd, versionArgs);
+  for (const [label, cmd, hint, versionArgs, validate] of required) {
+    const result = strict ? requireCommand(label, cmd, hint, versionArgs, validate) : requirementCheck(cmd, versionArgs, validate);
+    console.log(`${result.ok ? "OK " : "NO "} ${label}${result.output ? ` - ${result.output}` : ""}`);
+    if (!result.ok) {
+      console.log(`    ${hint}`);
+    }
+  }
+
+  const mediaTools = [
+    ["FFmpeg", "ffmpeg", "Required for reliable YouTube merging, audio extraction, and clip export. macOS: brew install ffmpeg", ["-version"]],
+  ];
+  console.log("\nMedia tools");
+  console.log("-----------");
+  for (const [label, cmd, hint, versionArgs] of mediaTools) {
+    const result = commandCheck(cmd, versionArgs);
     console.log(`${result.ok ? "OK " : "NO "} ${label}${result.output ? ` - ${result.output}` : ""}`);
     if (!result.ok) {
       console.log(`    ${hint}`);
@@ -121,15 +142,38 @@ function doctor({ strict = false } = {}) {
   console.log("- Argos language model may download on first translation when ARGOS_AUTO_INSTALL=true.");
 }
 
+function nodeVersionSupported(output) {
+  const match = output.match(/v?(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (major > 22) return true;
+  if (major === 22) return minor >= 12;
+  if (major === 20) return minor >= 19;
+  return false;
+}
+
 function startProcess(label, cmd, cmdArgs) {
-  const child = spawn(cmd, cmdArgs, { cwd: root, stdio: "inherit" });
+  const child = spawn(cmd, cmdArgs, { cwd: root, stdio: "inherit", detached: process.platform !== "win32" });
   child.on("exit", (code) => {
-    if (code && !shuttingDown) {
-      console.error(`[${label}] exited with code ${code}`);
-      shutdown(code);
+    if (!shuttingDown) {
+      console.error(`[${label}] exited unexpectedly with code ${code ?? "unknown"}`);
+      shutdown(code || 1);
     }
   });
   return child;
+}
+
+function signalProcessTree(child, signal) {
+  try {
+    if (process.platform !== "win32" && child.pid) {
+      process.kill(-child.pid, signal);
+    } else {
+      child.kill(signal);
+    }
+  } catch {
+    // The process may already have exited while the other services stop.
+  }
 }
 
 let shuttingDown = false;
@@ -139,9 +183,12 @@ function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   for (const child of children) {
-    child.kill("SIGTERM");
+    signalProcessTree(child, "SIGTERM");
   }
-  setTimeout(() => process.exit(code), 300).unref();
+  setTimeout(() => {
+    for (const child of children) signalProcessTree(child, "SIGKILL");
+    process.exit(code);
+  }, 1500);
 }
 
 if (checkOnly) {
@@ -161,10 +208,12 @@ if (installOnly) {
 console.log("\nStarting Tech PR Workbench:");
 console.log("- Backend:  http://127.0.0.1:8000");
 console.log("- Frontend: http://127.0.0.1:5173");
-console.log("Press Ctrl+C to stop both processes.\n");
+console.log("- Worker:   persistent local task processor");
+console.log("Press Ctrl+C to stop all three processes.\n");
 
 children = [
   startProcess("backend", "uv", ["run", "--project", "backend", "uvicorn", "--app-dir", "backend", "app.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"]),
+  startProcess("worker", "uv", ["--directory", "backend", "run", "python", "-m", "app.worker"]),
   startProcess("frontend", command("npm"), ["run", "dev", "--prefix", "frontend"]),
 ];
 

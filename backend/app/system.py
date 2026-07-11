@@ -8,11 +8,12 @@ import httpx
 
 from app.config import settings
 from app.opencli_runtime import opencli_path
+from app.ytdlp_runtime import ytdlp_status
 
 
 def system_status() -> dict:
     ffmpeg_path = shutil.which("ffmpeg")
-    yt_dlp_ok, yt_dlp_version = _yt_dlp_status()
+    yt_dlp_ok, yt_dlp_version = ytdlp_status()
     opencli_ok, opencli_message = _opencli_status()
     argos_ok, argos_message = _argos_status()
     ollama_ok, ollama_message = _ollama_status()
@@ -20,12 +21,12 @@ def system_status() -> dict:
         "youtube_api": {
             "ok": bool(settings.youtube_api_key),
             "label": "YouTube Data API",
-            "message": "已配置，可用官方免费配额发现公开视频。" if settings.youtube_api_key else "未配置，将优先用本机 yt-dlp 搜索。",
+            "message": "已配置，可用官方免费配额发现公开视频。" if settings.youtube_api_key else "未配置，将依次尝试 opencli 和本机 yt-dlp 搜索。",
         },
         "yt_dlp": {
             "ok": yt_dlp_ok,
             "label": "yt-dlp",
-            "message": yt_dlp_version if yt_dlp_ok else "未安装，无法本机搜索或授权下载。",
+            "message": yt_dlp_version,
         },
         "opencli": {
             "ok": opencli_ok,
@@ -35,7 +36,7 @@ def system_status() -> dict:
         "ffmpeg": {
             "ok": bool(ffmpeg_path),
             "label": "FFmpeg",
-            "message": ffmpeg_path or "未安装，无法抽音频和转码。",
+            "message": ffmpeg_path or "未安装，下载会尝试单文件格式，但抽音频、合并和导出视频会受限。",
         },
         "argos": {
             "ok": argos_ok,
@@ -60,17 +61,6 @@ def system_status() -> dict:
     }
 
 
-def _yt_dlp_status() -> tuple[bool, str]:
-    configured = settings.ytdlp_path.strip()
-    command = shutil.which(configured) if configured else None
-    if not command:
-        command = shutil.which("yt-dlp")
-    if not command:
-        return False, "未找到 yt-dlp 命令。"
-    ok, message = _command_version([command, "--version"])
-    return ok, f"{command} ({message})" if ok else message
-
-
 def _opencli_status() -> tuple[bool, str]:
     opencli = opencli_path()
     if not opencli:
@@ -85,21 +75,6 @@ def _opencli_status() -> tuple[bool, str]:
     if "Extension: connected" in output:
         return True, f"已连接；窗口模式 {settings.opencli_window_mode or 'default'}，preflight {'开启' if settings.opencli_preflight_enabled else '关闭'}。"
     return False, output or "OpenCLI daemon 已运行，但 Chrome 扩展未连接。"
-
-
-def _command_version(command: list[str]) -> tuple[bool, str]:
-    try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except Exception as exc:
-        return False, str(exc)
-    if completed.returncode != 0:
-        return False, completed.stderr.strip()
-    return True, completed.stdout.strip()
 
 
 def _argos_status() -> tuple[bool, str]:
