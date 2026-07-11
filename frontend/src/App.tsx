@@ -454,7 +454,6 @@ function App() {
                   jobIdsByVideo={jobIdsByVideo}
                   onSelect={(id) => selectVideo(id)}
                   onOpenClip={(video) => selectVideo(video.id, "editor")}
-                  onDownloadTranslate={startDownloadTranslate}
                 />
               ) : (
                 <EmptyState onRun={runDaily} running={runningDaily} />
@@ -577,7 +576,7 @@ function TaskCenter({
           <div className="status-empty task-list-empty">
             <Clock size={22} />
             <h2>还没有处理任务</h2>
-            <p>从“采访发现”下载视频后，进度、失败原因和重试操作会集中显示在这里。</p>
+            <p>从“采访发现”进入剪辑工作台后，素材准备进度、失败原因和重试操作会集中显示在这里。</p>
           </div>
         )}
       </div>
@@ -601,7 +600,6 @@ function InterviewList(props: {
   jobIdsByVideo: Record<number, number>;
   onSelect: (id: number) => void;
   onOpenClip: (video: Video) => void;
-  onDownloadTranslate: (video: Video) => void;
 }) {
   return (
     <div className="interview-list">
@@ -630,7 +628,7 @@ function InterviewList(props: {
               {video.last_error && <div className="inline-error">{video.last_error}</div>}
             </div>
             <div className="row-actions" onClick={(event) => event.stopPropagation()}>
-              <button className="ghost-action" onClick={() => props.onOpenClip(video)}>
+              <button className="primary" onClick={() => props.onOpenClip(video)}>
                 <Scissors size={16} />
                 剪辑
               </button>
@@ -638,10 +636,6 @@ function InterviewList(props: {
                 <ArrowSquareOut size={16} />
                 原始链接
               </a>
-              <button onClick={() => props.onDownloadTranslate(video)} disabled={processing}>
-                {processing ? <SpinnerGap size={16} className="spin" /> : <DownloadSimple size={16} />}
-                {video.status === "clip_ready" ? "重新下载翻译" : processing ? "处理中" : "下载并翻译"}
-              </button>
             </div>
           </article>
         );
@@ -681,7 +675,7 @@ function TaskStatus({
         <span>{selectedVideo.source_tier === "experimental" ? "实验源" : "稳定源"}</span>
       </div>
       <h2>{selectedVideo.title}</h2>
-      <p>{visibleJob?.message || selectedVideo.summary || "还没有任务。点击列表里的“下载并翻译”开始处理。"}</p>
+      <p>{visibleJob?.message || selectedVideo.summary || "还没有任务。进入剪辑工作台后即可准备素材。"}</p>
       {visibleJob && active && <JobProgress job={visibleJob} />}
       {visibleJob?.status === "failed" && (
         <button className="job-retry" type="button" onClick={() => void onRetry(visibleJob)}>
