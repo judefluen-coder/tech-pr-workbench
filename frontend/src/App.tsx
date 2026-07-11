@@ -1817,10 +1817,6 @@ function ClipWorkspace({
               </a>
             </div>
           </details>
-          <button className="primary export-primary" onClick={() => setExportDialogOpen(true)} disabled={!hasMedia || !clipMarks.length || rendering}>
-            {rendering ? <SpinnerGap size={16} className="spin" /> : <FileArrowDown size={16} />}
-            {rendering ? "导出中" : "导出序列视频..."}
-          </button>
         </div>
       </div>
 
@@ -1870,18 +1866,10 @@ function ClipWorkspace({
         </div>
       )}
 
-      <div className="simple-workflow-bar" aria-label="剪辑流程">
-        <div className={`simple-workflow-step ${rows.length ? "done" : "active"}`}>
-          <span>1</span>
-          <div><strong>选择片段</strong><small>{rows.length ? `${rows.length} 条字幕可选` : "等待字幕"}</small></div>
-        </div>
-        <div className={`simple-workflow-step ${clipMarks.length ? "done" : rows.length ? "active" : ""}`}>
-          <span>2</span>
-          <div><strong>整理顺序</strong><small>{clipMarks.length ? `${clipMarks.length} 段 · ${formatDuration(sequenceDuration)}` : "尚未加入片段"}</small></div>
-        </div>
-        <div className={`simple-workflow-step ${exportedSequenceCount ? "done" : clipMarks.length ? "active" : ""}`}>
-          <span>3</span>
-          <div><strong>导出成片</strong><small>{exportedSequenceCount ? `已有 ${exportedSequenceCount} 个成片` : "确认顺序后导出"}</small></div>
+      <div className="workflow-intro">
+        <div>
+          <strong>按下面 3 步完成粗剪</strong>
+          <span>从上往下操作：选片段、排顺序、导出成片。</span>
         </div>
         <button className="advanced-tools-toggle" type="button" aria-expanded={advancedToolsOpen} onClick={() => setAdvancedToolsOpen((open) => !open)}>
           {advancedToolsOpen ? <CaretUp size={15} /> : <CaretDown size={15} />}
@@ -1916,7 +1904,17 @@ function ClipWorkspace({
       )}
 
       <div className="clip-grid">
-        <div className="player-panel">
+        <section className={`workflow-step-section ${clipMarks.length ? "complete" : "current"}`}>
+          <header className="workflow-step-heading">
+            <span>第一步</span>
+            <div>
+              <h3>选择要保留的片段</h3>
+              <p>播放视频或阅读字幕，选中一句或多句后点击“加入选区”；也可以直接加入推荐高光。</p>
+            </div>
+            <strong>{clipMarks.length ? `已选 ${clipMarks.length} 段` : "请先选择片段"}</strong>
+          </header>
+          <div className="source-selection-grid">
+            <div className="player-panel">
           {clip?.media_url ? (
             <>
               <video
@@ -2060,20 +2058,9 @@ function ClipWorkspace({
               </button>
             </form>
           </div>}
-          <ExportResult result={renderResult} summary={deliverySummary} onCopyBrief={copyDeliveryBrief} />
-          {advancedToolsOpen && <ExportedAssetsPanel assets={clip?.media_assets ?? []} />}
-          {advancedToolsOpen && <DeliveryBriefPanel
-            brief={deliveryBrief}
-            marksCount={clipMarks.length}
-            nextStep={deliveryNextStep}
-            nextStepDisabled={deliveryNextStepDisabled}
-            summary={deliverySummary}
-            onCopy={copyDeliveryBrief}
-            onNextStep={runDeliveryNextStep}
-          />}
-        </div>
+            </div>
 
-        <div className="transcript-panel">
+            <div className="transcript-panel">
           <div className="transcript-head">
             <div>
               <h3>双语字幕</h3>
@@ -2154,34 +2141,78 @@ function ClipWorkspace({
               <div className="transcript-empty">{rows.length ? "没有匹配的字幕段。" : "点击“下载并翻译”后，中文字幕会在这里逐段显示。"}</div>
             )}
           </div>
-        </div>
+            </div>
+          </div>
+        </section>
 
-        <ClipSequence
-          simple={!advancedToolsOpen}
-          currentTime={currentTime}
-          duration={timelineDuration}
-          focusRequest={sequenceFocusRequest}
-          marks={clipMarks}
-          recentlyDeletedClip={recentlyDeletedClip}
-          reorderingId={reorderingClipId}
-          restoringDeleted={restoringDeletedClip}
-          bulkStatus={bulkUpdatingStatus}
-          copyableClipCount={copyableClipCount}
-          savingId={updatingClipId}
-          savingNew={savingClip}
-          transcriptRows={rows}
-          onBulkStatus={setAllClipStatusesInSequence}
-          onBulkCopy={fillClipCopyInSequence}
-          onDismissDeleted={() => setRecentlyDeletedClip(null)}
-          onDelete={removeFromSequence}
-          onDuplicate={duplicateClipInSequence}
-          onMove={moveClipInSequence}
-          onPreviewRange={previewDraftRange}
-          onReorder={reorderClipSequence}
-          onRestoreDeleted={restoreDeletedClip}
-          onSeek={seekTo}
-          onUpdate={updateClipInSequence}
-        />
+        <section className={`workflow-step-section ${clipMarks.length ? "current" : "locked"}`}>
+          <header className="workflow-step-heading">
+            <span>第二步</span>
+            <div>
+              <h3>排列成片顺序</h3>
+              <p>用上下移动调整播放顺序，点击预览检查内容，不需要的片段直接移除。</p>
+            </div>
+            <strong>{clipMarks.length ? `${clipMarks.length} 段 · ${formatDuration(sequenceDuration)}` : "等待第一步"}</strong>
+          </header>
+          <ClipSequence
+            simple={!advancedToolsOpen}
+            currentTime={currentTime}
+            duration={timelineDuration}
+            focusRequest={sequenceFocusRequest}
+            marks={clipMarks}
+            recentlyDeletedClip={recentlyDeletedClip}
+            reorderingId={reorderingClipId}
+            restoringDeleted={restoringDeletedClip}
+            bulkStatus={bulkUpdatingStatus}
+            copyableClipCount={copyableClipCount}
+            savingId={updatingClipId}
+            savingNew={savingClip}
+            transcriptRows={rows}
+            onBulkStatus={setAllClipStatusesInSequence}
+            onBulkCopy={fillClipCopyInSequence}
+            onDismissDeleted={() => setRecentlyDeletedClip(null)}
+            onDelete={removeFromSequence}
+            onDuplicate={duplicateClipInSequence}
+            onMove={moveClipInSequence}
+            onPreviewRange={previewDraftRange}
+            onReorder={reorderClipSequence}
+            onRestoreDeleted={restoreDeletedClip}
+            onSeek={seekTo}
+            onUpdate={updateClipInSequence}
+          />
+        </section>
+
+        <section className={`workflow-step-section export-step ${exportedSequenceCount ? "complete" : clipMarks.length ? "current" : "locked"}`}>
+          <header className="workflow-step-heading">
+            <span>第三步</span>
+            <div>
+              <h3>导出成片</h3>
+              <p>确认片段和顺序后生成 MP4；画幅、字幕样式等选项会在导出窗口中设置。</p>
+            </div>
+            <strong>{exportedSequenceCount ? `已有 ${exportedSequenceCount} 个成片` : clipMarks.length ? "可以导出" : "等待第二步"}</strong>
+          </header>
+          <div className="export-step-action">
+            <div>
+              <strong>{clipMarks.length ? `将按当前顺序导出 ${clipMarks.length} 个片段` : "序列中还没有片段"}</strong>
+              <span>{clipMarks.length ? `预计成片长度 ${formatDuration(sequenceDuration)}` : "先在第一步加入至少一个片段。"}</span>
+            </div>
+            <button className="primary" onClick={() => setExportDialogOpen(true)} disabled={!hasMedia || !clipMarks.length || rendering}>
+              {rendering ? <SpinnerGap size={16} className="spin" /> : <FileArrowDown size={16} />}
+              {rendering ? "导出中" : "导出序列视频"}
+            </button>
+          </div>
+          <ExportResult result={renderResult} summary={deliverySummary} onCopyBrief={copyDeliveryBrief} />
+          {advancedToolsOpen && <ExportedAssetsPanel assets={clip?.media_assets ?? []} />}
+          {advancedToolsOpen && <DeliveryBriefPanel
+            brief={deliveryBrief}
+            marksCount={clipMarks.length}
+            nextStep={deliveryNextStep}
+            nextStepDisabled={deliveryNextStepDisabled}
+            summary={deliverySummary}
+            onCopy={copyDeliveryBrief}
+            onNextStep={runDeliveryNextStep}
+          />}
+        </section>
       </div>
       {exportDialogOpen && (
         <div className="export-modal-backdrop" role="presentation">
