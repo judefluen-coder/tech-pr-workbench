@@ -37,6 +37,9 @@ export interface Job {
   attempts: number;
   created_at: string;
   updated_at: string;
+  video_id?: number | null;
+  video_title?: string;
+  video_url?: string;
 }
 
 export interface SourceRun {

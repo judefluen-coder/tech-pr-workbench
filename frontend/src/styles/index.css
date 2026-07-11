@@ -5006,3 +5006,249 @@ label textarea:focus,
     flex-direction: column;
   }
 }
+
+/* Local Studio workspace views */
+.workspace-tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  padding: 4px;
+}
+
+.workspace-tabs button {
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.workspace-tabs button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.workspace-tabs button.active {
+  background: #ffffff;
+  color: #12251f;
+}
+
+.workspace-tabs button > span {
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: #cae8dc;
+  color: #123d32;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.view-panel {
+  margin-top: 14px;
+}
+
+.view-command-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 0 2px 14px;
+}
+
+.date-range-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.date-range-actions .date-control {
+  min-width: 176px;
+  background: #ffffff;
+}
+
+.view-command-bar > .primary {
+  min-width: 172px;
+}
+
+.discovery-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tasks-grid {
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.task-list-panel {
+  min-width: 0;
+}
+
+.job-list {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.job-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 14px 16px;
+}
+
+.job-row:last-child {
+  border-bottom: 0;
+}
+
+.job-row.selectable {
+  cursor: pointer;
+}
+
+.job-row.selectable:hover {
+  background: #f8fafc;
+}
+
+.job-row.selected {
+  background: #f1f8f5;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.job-row-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.job-row-head,
+.job-row-meta,
+.job-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.job-row-head > span:not(.status-badge) {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.job-row-head time,
+.job-row-meta {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.job-row h3 {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-row p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.job-row-actions {
+  align-content: center;
+  justify-content: flex-end;
+}
+
+.job-row-actions button {
+  min-height: 34px;
+}
+
+.task-list-empty {
+  min-height: 300px;
+}
+
+.transcript-load-more {
+  width: 100%;
+  min-height: 42px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: #f8fafc;
+  color: var(--accent);
+}
+
+.transcript-load-more:hover {
+  background: #eef4fb;
+}
+
+@media (max-width: 1180px) {
+  .tasks-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .app-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workspace-tabs {
+    align-self: stretch;
+  }
+
+  .workspace-tabs button {
+    flex: 1 1 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .workspace-tabs {
+    overflow-x: auto;
+  }
+
+  .workspace-tabs button {
+    flex: 0 0 auto;
+    padding: 0 10px;
+  }
+
+  .view-command-bar,
+  .date-range-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .date-range-actions .date-control,
+  .view-command-bar > .primary {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .job-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .job-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .job-row-actions button {
+    width: 100%;
+  }
+}

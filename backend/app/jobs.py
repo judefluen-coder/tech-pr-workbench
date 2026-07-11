@@ -39,7 +39,7 @@ def get_job(job_id: int) -> dict:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row:
         raise ValueError("任务不存在。")
-    return row_to_dict(row)
+    return _with_video_context([row_to_dict(row)])[0]
 
 
 def list_jobs(video_id: int | None = None, limit: int = 100) -> list[dict]:
@@ -51,8 +51,9 @@ def list_jobs(video_id: int | None = None, limit: int = 100) -> list[dict]:
             for row in conn.execute(query, params).fetchall()
         ]
     if video_id is None:
-        return rows
-    return [row for row in rows if job_payload(row).get("video_id") == video_id][: max(limit, 1)]
+        return _with_video_context(rows)
+    filtered = [row for row in rows if job_payload(row).get("video_id") == video_id][: max(limit, 1)]
+    return _with_video_context(filtered)
 
 
 def retry_job(job_id: int) -> dict:
@@ -145,3 +146,38 @@ def job_payload(job: dict) -> dict:
     except (TypeError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _with_video_context(jobs: list[dict]) -> list[dict]:
+    video_ids = sorted(
+        {
+            int(video_id)
+            for job in jobs
+            if (video_id := job_payload(job).get("video_id")) and str(video_id).isdigit() and int(video_id) > 0
+        }
+    )
+    videos: dict[int, dict] = {}
+    if video_ids:
+        placeholders = ", ".join("?" for _ in video_ids)
+        with get_connection() as conn:
+            videos = {
+                row["id"]: row_to_dict(row)
+                for row in conn.execute(
+                    f"SELECT id, title, url FROM videos WHERE id IN ({placeholders})",
+                    video_ids,
+                ).fetchall()
+            }
+    enriched: list[dict] = []
+    for job in jobs:
+        item = dict(job)
+        video_id = job_payload(item).get("video_id")
+        try:
+            normalized_video_id = int(video_id) if video_id else None
+        except (TypeError, ValueError):
+            normalized_video_id = None
+        item["video_id"] = normalized_video_id
+        video = videos.get(normalized_video_id) if normalized_video_id else None
+        item["video_title"] = video.get("title", "") if video else ""
+        item["video_url"] = video.get("url", "") if video else ""
+        enriched.append(item)
+    return enriched

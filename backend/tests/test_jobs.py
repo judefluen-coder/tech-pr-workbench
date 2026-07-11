@@ -1,4 +1,4 @@
-from app.db import init_db
+from app.db import get_connection, init_db, now_iso
 from app.jobs import claim_next_job, enqueue_job, fail_job, get_job, list_jobs, recover_interrupted_jobs, retry_job
 from app.worker import run_worker_once
 
@@ -43,6 +43,28 @@ def test_video_jobs_are_deduplicated_and_filtered_before_limit(monkeypatch, tmp_
 
     assert duplicate["id"] == first["id"]
     assert [job["id"] for job in list_jobs(video_id=7, limit=1)] == [first["id"]]
+
+
+def test_video_jobs_include_context_for_restored_task_lists(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("TECH_PR_DB_PATH", str(tmp_path / "app.db"))
+    init_db()
+    timestamp = now_iso()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO videos (
+              id, platform, external_id, url, title, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (74, "youtube", "restore-74", "https://example.com/watch/74", "恢复后的采访标题", timestamp, timestamp),
+        )
+    job = enqueue_job("download_translate", {"video_id": 74}, "等待下载")
+
+    restored = get_job(job["id"])
+
+    assert restored["video_id"] == 74
+    assert restored["video_title"] == "恢复后的采访标题"
+    assert restored["video_url"] == "https://example.com/watch/74"
 
 
 def test_recovery_only_requeues_worker_owned_jobs(monkeypatch, tmp_path) -> None:

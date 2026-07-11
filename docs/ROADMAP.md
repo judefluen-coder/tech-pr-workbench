@@ -32,10 +32,11 @@ Authentication, billing, real-time collaboration, multi-track editing, complex t
    - Added crop/contain framing, horizontal subject focus, subtitle templates and safe zones, and uploaded Logo overlays.
    - Validate all render options before queuing and verify output dimensions, burned subtitles, and Logo pixels in integration tests.
 
-4. **Focused web workflow** — Planned
-   - Separate discovery, task status, and the clip editor into focused views.
-   - Restore the selected item and editing context after refresh.
-   - Reduce duplicate actions and optimize long transcript rendering.
+4. **Focused web workflow** — Complete
+   - Separated discovery, persistent task history, and the clip editor into focused views.
+   - Restore the date range, selected video, active view, playhead, draft clip form, transcript search, and export settings after refresh.
+   - Added task-to-video context and retry actions, plus progressive long-transcript rendering that keeps the active caption available.
+   - Verified desktop and mobile layouts, including internal task scrolling and export-modal overflow behavior.
 
 5. **Release verification** — Planned
    - Cover real discovery/download, restart recovery, and video export.

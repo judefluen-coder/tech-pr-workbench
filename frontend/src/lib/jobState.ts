@@ -4,7 +4,8 @@ export function isActiveJobStatus(status: string): boolean {
   return status === "queued" || status === "running";
 }
 
-export function jobVideoId(job: Pick<Job, "payload">): number | null {
+export function jobVideoId(job: Pick<Job, "payload"> & Partial<Pick<Job, "video_id">>): number | null {
+  if (Number.isInteger(job.video_id) && Number(job.video_id) > 0) return Number(job.video_id);
   try {
     const payload = JSON.parse(job.payload || "{}");
     const videoId = Number(payload?.video_id);

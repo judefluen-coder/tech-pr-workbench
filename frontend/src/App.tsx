@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, DragEvent, FormEvent, KeyboardEvent, SyntheticEvent } from "react";
 import {
   ArrowCounterClockwise,
@@ -38,6 +38,8 @@ import { resolveClipEditShortcut } from "./lib/clipShortcuts";
 import { buildManualClipValidation, type ManualClipValidation } from "./lib/clipValidation";
 import { formatDate, formatDuration, formatNumber, formatTimecode, statusLabel } from "./lib/format";
 import { buildJobState, isActiveJobStatus, jobResult, jobVideoId } from "./lib/jobState";
+import { buildTranscriptWindow } from "./lib/transcriptWindow";
+import { loadClipEditorState, loadWorkspaceState, saveClipEditorState, saveWorkspaceState, type WorkspaceView } from "./lib/workspaceState";
 import type { ClipMark, ClipPayload, ClipRenderOptions, ClipRenderResult, DailyReport, Job, MediaAsset, SourceRun, Transcript, Video } from "./types";
 
 const VIDEO_PROCESSING_STATUSES = new Set(["downloading", "subtitle_fetching", "transcribing", "translating"]);
@@ -154,11 +156,13 @@ type ExportPreflightActions = Partial<Record<string, ExportPreflightAction>>;
 
 function App() {
   const defaultRange = useMemo(() => defaultBeijingRange(), []);
+  const restoredWorkspace = useMemo(() => loadWorkspaceState(), []);
   const dailyRequestIdRef = useRef(0);
-  const [startDate, setStartDate] = useState(defaultRange.start);
-  const [endDate, setEndDate] = useState(defaultRange.end);
+  const [startDate, setStartDate] = useState(restoredWorkspace?.startDate ?? defaultRange.start);
+  const [endDate, setEndDate] = useState(restoredWorkspace?.endDate ?? defaultRange.end);
   const [report, setReport] = useState<DailyReport | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(restoredWorkspace?.selectedVideoId ?? null);
+  const [activeView, setActiveView] = useState<WorkspaceView>(restoredWorkspace?.view ?? "discovery");
   const [clip, setClip] = useState<ClipPayload | null>(null);
   const [jobs, setJobs] = useState<Record<number, Job>>({});
   const [jobIdsByVideo, setJobIdsByVideo] = useState<Record<number, number>>({});
@@ -176,7 +180,7 @@ function App() {
       if (requestId !== dailyRequestIdRef.current) return;
       setReport(next);
       const selectedStillVisible = next.items.some((item) => item.id === selectedId);
-      if (!selectedStillVisible) setSelectedId(next.items[0]?.id ?? null);
+      if (!selectedStillVisible && activeView === "discovery") setSelectedId(next.items[0]?.id ?? null);
     } catch (error) {
       if (requestId !== dailyRequestIdRef.current) return;
       setToast(readError(error, "日报加载失败"));
@@ -188,6 +192,19 @@ function App() {
   useEffect(() => {
     loadDaily({ start: startDate, end: endDate });
   }, [startDate, endDate]);
+
+  useEffect(() => {
+    saveWorkspaceState({ startDate, endDate, selectedVideoId: selectedId, view: activeView });
+  }, [activeView, endDate, selectedId, startDate]);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [activeView]);
+
+  useEffect(() => {
+    if (activeView !== "discovery" || !report) return;
+    if (!report.items.some((item) => item.id === selectedId)) setSelectedId(report.items[0]?.id ?? null);
+  }, [activeView, report, selectedId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -296,6 +313,7 @@ function App() {
     try {
       const job = await api.downloadTranslate(video.id, { quality: "1080p" });
       trackJob(video.id, job);
+      setActiveView("tasks");
       setToast(job.message);
     } catch (error) {
       setToast(readError(error, "下载翻译失败"));
@@ -331,14 +349,11 @@ function App() {
   const latestJobId = selectedId ? latestJobIdsByVideo[selectedId] : undefined;
   const selectedJob = latestJobId ? jobs[latestJobId] ?? null : null;
   const selectedProcessing = Boolean(activeJobId) || Boolean(selectedVideo && VIDEO_PROCESSING_STATUSES.has(selectedVideo.status));
+  const activeJobsCount = Object.keys(jobIdsByVideo).length;
 
-  const selectVideo = (id: number, focusClip = false) => {
+  const selectVideo = (id: number, view?: WorkspaceView) => {
     setSelectedId(id);
-    if (focusClip) {
-      window.setTimeout(() => {
-        document.getElementById("clip-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 60);
-    }
+    if (view) setActiveView(view);
   };
 
   return (
@@ -349,86 +364,120 @@ function App() {
             <GlobeHemisphereEast size={24} weight="duotone" />
           </div>
           <div>
-            <h1>AI 采访日报</h1>
-            <p>按指定日期区间抓取新增采访，保留原链，一键下载翻译后进入剪辑。</p>
+            <h1>Tech PR Workbench</h1>
+            <p>本地采访发现、字幕处理与粗剪工作室</p>
           </div>
         </div>
-        <div className="header-actions">
-          <label className="date-control">
-            <CalendarBlank size={17} />
-            <span>开始</span>
-            <input value={startDate} type="date" onInput={(event) => setStartDate(event.currentTarget.value)} onChange={(event) => setStartDate(event.target.value)} />
-          </label>
-          <label className="date-control">
-            <CalendarBlank size={17} />
-            <span>结束</span>
-            <input value={endDate} type="date" onInput={(event) => setEndDate(event.currentTarget.value)} onChange={(event) => setEndDate(event.target.value)} />
-          </label>
-          <button className="primary" onClick={runDaily} disabled={runningDaily}>
-            {runningDaily ? <SpinnerGap size={17} className="spin" /> : <DownloadSimple size={17} />}
-            {runningDaily ? "抓取中" : "抓取区间 AI 采访"}
+        <nav className="workspace-tabs" role="tablist" aria-label="工作视图">
+          <button className={activeView === "discovery" ? "active" : ""} role="tab" aria-selected={activeView === "discovery"} onClick={() => setActiveView("discovery")}>
+            <GlobeHemisphereEast size={16} />
+            采访发现
           </button>
-        </div>
+          <button className={activeView === "tasks" ? "active" : ""} role="tab" aria-selected={activeView === "tasks"} onClick={() => setActiveView("tasks")}>
+            <Clock size={16} />
+            处理任务
+            {activeJobsCount > 0 && <span>{activeJobsCount}</span>}
+          </button>
+          <button className={activeView === "editor" ? "active" : ""} role="tab" aria-selected={activeView === "editor"} onClick={() => setActiveView("editor")}>
+            <Scissors size={16} />
+            剪辑工作台
+          </button>
+        </nav>
       </header>
 
-      <section className="summary-strip">
-        <Metric label="候选采访" value={stats.total} detail="按北京时间区间" />
-        <Metric label="可处理" value={stats.ready} detail="可下载翻译" />
-        <Metric label="处理中" value={stats.processing} detail="下载/字幕/转写" />
-        <Metric label="可剪辑" value={stats.clipReady} detail="已带中文字幕" />
-      </section>
-
-      <section className="source-strip">
-        {(report?.source_runs ?? []).map((source) => (
-          <SourcePill key={`${source.name}-${source.status}`} source={source} />
-        ))}
-      </section>
-
-      <section className="workbench-grid">
-        <div className="daily-panel">
-          <div className="panel-toolbar">
-            <div>
-              <h2>{startDate === endDate ? startDate : `${startDate} 至 ${endDate}`} AI 采访列表</h2>
-              <p>{report ? `北京时间窗口：${formatDate(report.window_start)} - ${formatDate(report.window_end)}` : "正在准备日报"}</p>
+      {activeView === "discovery" && (
+        <div className="view-panel" role="tabpanel" aria-label="采访发现">
+          <section className="view-command-bar">
+            <div className="date-range-actions">
+              <label className="date-control">
+                <CalendarBlank size={17} />
+                <span>开始</span>
+                <input value={startDate} type="date" onInput={(event) => setStartDate(event.currentTarget.value)} onChange={(event) => setStartDate(event.target.value)} />
+              </label>
+              <label className="date-control">
+                <CalendarBlank size={17} />
+                <span>结束</span>
+                <input value={endDate} type="date" onInput={(event) => setEndDate(event.currentTarget.value)} onChange={(event) => setEndDate(event.target.value)} />
+              </label>
             </div>
-            <label className="search-control">
-              <MagnifyingGlass size={17} />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜人物、标题、频道" />
-            </label>
-          </div>
-          {loading ? (
-            <LoadingRows />
-          ) : filteredItems.length ? (
-            <InterviewList
-              items={filteredItems}
-              selectedId={selectedId}
-              jobs={jobs}
-              jobIdsByVideo={jobIdsByVideo}
-              onSelect={selectVideo}
-              onOpenClip={(video) => selectVideo(video.id, true)}
-              onDownloadTranslate={startDownloadTranslate}
-            />
-          ) : (
-            <EmptyState onRun={runDaily} running={runningDaily} />
-          )}
+            <button className="primary" onClick={runDaily} disabled={runningDaily}>
+              {runningDaily ? <SpinnerGap size={17} className="spin" /> : <DownloadSimple size={17} />}
+              {runningDaily ? "抓取中" : "抓取区间 AI 采访"}
+            </button>
+          </section>
+
+          <section className="summary-strip">
+            <Metric label="候选采访" value={stats.total} detail="按北京时间区间" />
+            <Metric label="可处理" value={stats.ready} detail="可下载翻译" />
+            <Metric label="处理中" value={stats.processing} detail="下载/字幕/转写" />
+            <Metric label="可剪辑" value={stats.clipReady} detail="已带中文字幕" />
+          </section>
+
+          <section className="source-strip">
+            {(report?.source_runs ?? []).map((source) => (
+              <SourcePill key={`${source.name}-${source.status}`} source={source} />
+            ))}
+          </section>
+
+          <section className="workbench-grid discovery-grid">
+            <div className="daily-panel">
+              <div className="panel-toolbar">
+                <div>
+                  <h2>{startDate === endDate ? startDate : `${startDate} 至 ${endDate}`} AI 采访列表</h2>
+                  <p>{report ? `北京时间窗口：${formatDate(report.window_start)} - ${formatDate(report.window_end)}` : "正在准备日报"}</p>
+                </div>
+                <label className="search-control">
+                  <MagnifyingGlass size={17} />
+                  <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜人物、标题、频道" />
+                </label>
+              </div>
+              {loading ? (
+                <LoadingRows />
+              ) : filteredItems.length ? (
+                <InterviewList
+                  items={filteredItems}
+                  selectedId={selectedId}
+                  jobs={jobs}
+                  jobIdsByVideo={jobIdsByVideo}
+                  onSelect={(id) => selectVideo(id)}
+                  onOpenClip={(video) => selectVideo(video.id, "editor")}
+                  onDownloadTranslate={startDownloadTranslate}
+                />
+              ) : (
+                <EmptyState onRun={runDaily} running={runningDaily} />
+              )}
+            </div>
+          </section>
         </div>
+      )}
 
-        <aside className="status-panel">
-          <TaskStatus selectedVideo={selectedVideo} job={selectedJob} active={Boolean(activeJobId)} onRetry={retryTrackedJob} />
-        </aside>
-      </section>
+      {activeView === "tasks" && (
+        <TaskCenter
+          activeJobId={activeJobId}
+          jobs={jobs}
+          selectedId={selectedId}
+          selectedJob={selectedJob}
+          selectedVideo={selectedVideo}
+          onOpenEditor={(id) => selectVideo(id, "editor")}
+          onRetry={retryTrackedJob}
+          onSelect={(id) => selectVideo(id)}
+        />
+      )}
 
-      <ClipWorkspace
-        clip={clip}
-        job={selectedJob}
-        selectedVideo={selectedVideo}
-        processing={selectedProcessing}
-        onDownloadTranslate={startDownloadTranslate}
-        onReprocessSubtitles={startSubtitleReprocess}
-        onJobQueued={trackJob}
-        onRefresh={() => selectedId && api.clipPayload(selectedId).then(setClip)}
-        onToast={setToast}
-      />
+      {activeView === "editor" && (
+        <ClipWorkspace
+          key={selectedId ?? "empty-editor"}
+          clip={clip}
+          job={selectedJob}
+          selectedVideo={selectedVideo}
+          processing={selectedProcessing}
+          onDownloadTranslate={startDownloadTranslate}
+          onReprocessSubtitles={startSubtitleReprocess}
+          onJobQueued={trackJob}
+          onRefresh={() => selectedId && api.clipPayload(selectedId).then(setClip)}
+          onToast={setToast}
+        />
+      )}
 
       {toast && (
         <button className="toast" onClick={() => setToast("")}>
@@ -436,6 +485,99 @@ function App() {
         </button>
       )}
     </main>
+  );
+}
+
+function TaskCenter({
+  activeJobId,
+  jobs,
+  selectedId,
+  selectedJob,
+  selectedVideo,
+  onOpenEditor,
+  onRetry,
+  onSelect,
+}: {
+  activeJobId?: number;
+  jobs: Record<number, Job>;
+  selectedId: number | null;
+  selectedJob: Job | null;
+  selectedVideo: Video | null;
+  onOpenEditor: (videoId: number) => void;
+  onRetry: (job: Job) => void | Promise<void>;
+  onSelect: (videoId: number) => void;
+}) {
+  const records = Object.values(jobs).sort((left, right) => right.id - left.id).slice(0, 60);
+  return (
+    <section className="workbench-grid tasks-grid view-panel" role="tabpanel" aria-label="处理任务">
+      <div className="daily-panel task-list-panel">
+        <div className="panel-toolbar">
+          <div>
+            <h2>处理任务</h2>
+            <p>{records.length ? `最近 ${records.length} 条本地任务` : "下载、字幕和导出任务会显示在这里"}</p>
+          </div>
+        </div>
+        {records.length ? (
+          <div className="job-list">
+            {records.map((job) => {
+              const videoId = jobVideoId(job);
+              const active = isActiveJobStatus(job.status);
+              return (
+                <article
+                  className={`job-row ${videoId && selectedId === videoId ? "selected" : ""} ${videoId ? "selectable" : ""}`}
+                  key={job.id}
+                  onClick={() => videoId && onSelect(videoId)}
+                >
+                  <div className="job-row-main">
+                    <div className="job-row-head">
+                      <StatusBadge status={job.status} />
+                      <span>{jobTypeLabel(job.type)}</span>
+                      <time>{formatJobTime(job.created_at)}</time>
+                    </div>
+                    <h3>{job.video_title || (videoId ? `视频 #${videoId}` : jobTypeLabel(job.type))}</h3>
+                    <p>{job.message || "等待后台处理器更新状态。"}</p>
+                    {active && <JobProgress job={job} />}
+                    <div className="job-row-meta">
+                      <span>任务 #{job.id}</span>
+                      <span>执行 {job.attempts || 0} 次</span>
+                    </div>
+                  </div>
+                  <div className="job-row-actions" onClick={(event) => event.stopPropagation()}>
+                    {job.status === "failed" && (
+                      <button type="button" onClick={() => void onRetry(job)}>
+                        <ArrowCounterClockwise size={15} />
+                        重试
+                      </button>
+                    )}
+                    {videoId && (
+                      <button className="ghost-action" type="button" onClick={() => onOpenEditor(videoId)}>
+                        <Scissors size={15} />
+                        打开剪辑
+                      </button>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="status-empty task-list-empty">
+            <Clock size={22} />
+            <h2>还没有处理任务</h2>
+            <p>从“采访发现”下载视频后，进度、失败原因和重试操作会集中显示在这里。</p>
+          </div>
+        )}
+      </div>
+      <aside className="status-panel">
+        <TaskStatus
+          selectedVideo={selectedVideo}
+          job={selectedJob}
+          active={Boolean(activeJobId)}
+          onRetry={onRetry}
+          onOpenEditor={selectedVideo ? () => onOpenEditor(selectedVideo.id) : undefined}
+        />
+      </aside>
+    </section>
   );
 }
 
@@ -500,11 +642,13 @@ function TaskStatus({
   job,
   active,
   onRetry,
+  onOpenEditor,
 }: {
   selectedVideo: Video | null;
   job: Job | null;
   active: boolean;
   onRetry: (job: Job) => void | Promise<void>;
+  onOpenEditor?: () => void;
 }) {
   if (!selectedVideo) {
     return (
@@ -538,6 +682,12 @@ function TaskStatus({
         <Step done={ready} active={selectedVideo.status === "transcribing" || selectedVideo.status === "translating"} label="转写翻译" />
         <Step done={ready} active={ready} label="进入剪辑" />
       </div>
+      {onOpenEditor && (
+        <button className="primary wide-link" type="button" onClick={onOpenEditor}>
+          <Scissors size={16} />
+          进入剪辑工作台
+        </button>
+      )}
       <a className="wide-link" href={selectedVideo.url} target="_blank" rel="noreferrer">
         <LinkSimple size={16} />
         打开原始视频
@@ -648,6 +798,9 @@ function ClipWorkspace({
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadedLogo, setUploadedLogo] = useState<MediaAsset | null>(null);
   const [transcriptSearch, setTranscriptSearch] = useState("");
+  const deferredTranscriptSearch = useDeferredValue(transcriptSearch);
+  const [transcriptRenderLimit, setTranscriptRenderLimit] = useState(120);
+  const [editorStateVideoId, setEditorStateVideoId] = useState<number | null>(null);
   const [transcriptSelection, setTranscriptSelection] = useState<TranscriptSelection | null>(null);
   const [recentlyDeletedClip, setRecentlyDeletedClip] = useState<RecentlyDeletedClip | null>(null);
   const [restoringDeletedClip, setRestoringDeletedClip] = useState(false);
@@ -657,10 +810,20 @@ function ClipWorkspace({
   const [reorderingClipId, setReorderingClipId] = useState<number | null>(null);
   const renderJob = job?.type === "render_clips" ? job : null;
   const rendering = queueingRender || Boolean(renderJob && isActiveJobStatus(renderJob.status));
-  const zh = clip?.transcripts.filter((item) => item.language === "zh") ?? [];
-  const en = clip?.transcripts.filter((item) => item.language === "en") ?? [];
-  const rows = buildTranscriptRows(zh, en);
-  const visibleTranscriptRows = useMemo(() => filterTranscriptRows(rows, transcriptSearch), [rows, transcriptSearch]);
+  const rows = useMemo(() => {
+    const transcripts = clip?.transcripts ?? [];
+    return buildTranscriptRows(
+      transcripts.filter((item) => item.language === "zh"),
+      transcripts.filter((item) => item.language === "en"),
+    );
+  }, [clip?.transcripts]);
+  const activeTranscriptIndex = rows.findIndex((row) => currentTime >= row.start && currentTime < row.end);
+  const hasChineseTranscript = rows.some((row) => Boolean(row.zh));
+  const visibleTranscriptRows = useMemo(() => filterTranscriptRows(rows, deferredTranscriptSearch), [deferredTranscriptSearch, rows]);
+  const renderedTranscriptRows = useMemo(
+    () => buildTranscriptWindow(visibleTranscriptRows, transcriptRenderLimit, activeTranscriptIndex),
+    [activeTranscriptIndex, transcriptRenderLimit, visibleTranscriptRows],
+  );
   const selectedTranscriptRange = useMemo(() => buildTranscriptSelectionSummary(rows, transcriptSelection), [rows, transcriptSelection]);
   const clipMarks = clip?.clip_marks ?? [];
   const latestBrandLogo = uploadedLogo ?? (clip?.media_assets ?? []).find((asset) => asset.kind === "brand_logo") ?? null;
@@ -673,7 +836,6 @@ function ClipWorkspace({
   const lastClipEnd = clipMarks.length ? Math.max(...clipMarks.map((mark) => mark.end_seconds)) : 0;
   const timelineDuration = Math.max(mediaDuration, video?.duration_seconds || 0, lastTranscriptEnd, lastClipEnd, Number(form.end_seconds) || 0, 1);
   const suggestions = useMemo(() => buildHighlightSuggestions(rows, timelineDuration), [rows, timelineDuration]);
-  const activeTranscriptIndex = rows.findIndex((row) => currentTime >= row.start && currentTime < row.end);
   const sequenceDuration = clipMarksDuration(clipMarks);
   const approvedClipMarks = clipMarks.filter((mark) => mark.status === "approved");
   const unapprovedClipMarks = clipMarks.filter((mark) => mark.status !== "approved");
@@ -707,8 +869,10 @@ function ClipWorkspace({
   );
 
   useEffect(() => {
-    setForm({ start_seconds: "0", end_seconds: "15", label: "PR 短切片段", note: "", quote: "" });
-    setCurrentTime(0);
+    const defaults = defaultClipEditorState(video?.title ?? "");
+    const restored = video ? loadClipEditorState(video.id, defaults) : defaults;
+    setForm(restored.form);
+    setCurrentTime(restored.currentTime);
     setMediaDuration(0);
     setDraftPreviewRange(null);
     setReviewingClipId(null);
@@ -720,18 +884,43 @@ function ClipWorkspace({
     setUpdatingClipId(null);
     setReorderingClipId(null);
     setExportDialogOpen(false);
-    setTranscriptSearch("");
+    setTranscriptSearch(restored.transcriptSearch);
+    setTranscriptRenderLimit(120);
     setTranscriptSelection(null);
     setRecentlyDeletedClip(null);
     setRestoringDeletedClip(false);
     setBulkUpdatingStatus(null);
     setSequenceFocusRequest(null);
-    setExportOptions(defaultClipExportOptions(video?.title ?? ""));
+    setExportOptions(restored.exportOptions);
+    setEditorStateVideoId(video?.id ?? null);
   }, [video?.id]);
 
   useEffect(() => {
+    if (!video || editorStateVideoId !== video.id) return;
+    const timer = window.setTimeout(() => {
+      saveClipEditorState(video.id, {
+        currentTime,
+        exportOptions,
+        form,
+        transcriptSearch,
+      });
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [currentTime, editorStateVideoId, exportOptions, form, transcriptSearch, video?.id]);
+
+  useEffect(() => {
+    setTranscriptRenderLimit(120);
+  }, [deferredTranscriptSearch, video?.id]);
+
+  useEffect(() => {
     if (activeTranscriptIndex < 0) return;
-    activeCaptionRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const activeCaption = activeCaptionRef.current;
+    const transcriptList = activeCaption?.closest<HTMLElement>(".transcript-list");
+    if (!activeCaption || !transcriptList) return;
+    const activeRect = activeCaption.getBoundingClientRect();
+    const listRect = transcriptList.getBoundingClientRect();
+    const top = transcriptList.scrollTop + activeRect.top - listRect.top - (transcriptList.clientHeight - activeRect.height) / 2;
+    transcriptList.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
   }, [activeTranscriptIndex]);
 
   useEffect(() => {
@@ -1704,8 +1893,11 @@ function ClipWorkspace({
                 ref={videoRef}
                 src={clip.media_url}
                 onLoadedMetadata={(event) => {
-                  setMediaDuration(event.currentTarget.duration || 0);
-                  setCurrentTime(event.currentTarget.currentTime || 0);
+                  const duration = event.currentTarget.duration || 0;
+                  const restoredTime = clamp(currentTime, 0, duration || currentTime);
+                  event.currentTarget.currentTime = restoredTime;
+                  setMediaDuration(duration);
+                  setCurrentTime(restoredTime);
                   window.setTimeout(showChineseTextTrack, 0);
                 }}
                 onSeeked={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
@@ -1716,7 +1908,7 @@ function ClipWorkspace({
                 }}
                 onTimeUpdate={handleVideoTimeUpdate}
               >
-                {ready && zh.length > 0 && (
+                {ready && hasChineseTranscript && (
                   <track
                     default
                     kind="subtitles"
@@ -1844,7 +2036,7 @@ function ClipWorkspace({
           <div className="transcript-head">
             <div>
               <h3>双语字幕</h3>
-              <span>{rows.length ? `${visibleTranscriptRows.length}/${rows.length} 段` : "等待生成"}</span>
+              <span>{rows.length ? `已显示 ${renderedTranscriptRows.length}/${visibleTranscriptRows.length} · 共 ${rows.length} 段` : "等待生成"}</span>
             </div>
             <label className="transcript-search" aria-label="筛选字幕">
               <MagnifyingGlass size={15} />
@@ -1879,33 +2071,44 @@ function ClipWorkspace({
           )}
           <div className="transcript-list">
             {visibleTranscriptRows.length ? (
-              visibleTranscriptRows.map(({ row, index }) => {
-                const selected = Boolean(selectedTranscriptRange && index >= selectedTranscriptRange.startIndex && index <= selectedTranscriptRange.endIndex);
-                const className = [
-                  "transcript-row",
-                  index === activeTranscriptIndex ? "active" : "",
-                  selected ? "selected" : "",
-                  selectedTranscriptRange?.startIndex === index ? "range-start" : "",
-                  selectedTranscriptRange?.endIndex === index ? "range-end" : "",
-                ].filter(Boolean).join(" ");
-                return (
+              <>
+                {renderedTranscriptRows.map(({ row, index }) => {
+                  const selected = Boolean(selectedTranscriptRange && index >= selectedTranscriptRange.startIndex && index <= selectedTranscriptRange.endIndex);
+                  const className = [
+                    "transcript-row",
+                    index === activeTranscriptIndex ? "active" : "",
+                    selected ? "selected" : "",
+                    selectedTranscriptRange?.startIndex === index ? "range-start" : "",
+                    selectedTranscriptRange?.endIndex === index ? "range-end" : "",
+                  ].filter(Boolean).join(" ");
+                  return (
+                    <button
+                      aria-pressed={selected}
+                      className={className}
+                      key={`${row.start}-${index}`}
+                      onClick={(event) => selectTranscriptRange(index, event.shiftKey)}
+                      ref={index === activeTranscriptIndex ? (node) => {
+                        activeCaptionRef.current = node;
+                      } : undefined}
+                    >
+                      <span className="timecode">{formatTimecode(row.start)}</span>
+                      <span>
+                        <strong>{row.zh?.text || "暂无中文字幕"}</strong>
+                        {row.en?.text && <small>{row.en.text}</small>}
+                      </span>
+                    </button>
+                  );
+                })}
+                {renderedTranscriptRows.length < visibleTranscriptRows.length && (
                   <button
-                    aria-pressed={selected}
-                    className={className}
-                    key={`${row.start}-${index}`}
-                    onClick={(event) => selectTranscriptRange(index, event.shiftKey)}
-                    ref={index === activeTranscriptIndex ? (node) => {
-                      activeCaptionRef.current = node;
-                    } : undefined}
+                    className="transcript-load-more"
+                    type="button"
+                    onClick={() => setTranscriptRenderLimit((current) => current + 120)}
                   >
-                    <span className="timecode">{formatTimecode(row.start)}</span>
-                    <span>
-                      <strong>{row.zh?.text || "暂无中文字幕"}</strong>
-                      {row.en?.text && <small>{row.en.text}</small>}
-                    </span>
+                    显示更多字幕 · 还剩 {visibleTranscriptRows.length - renderedTranscriptRows.length} 条
                   </button>
-                );
-              })
+                )}
+              </>
             ) : (
               <div className="transcript-empty">{rows.length ? "没有匹配的字幕段。" : "点击“下载并翻译”后，中文字幕会在这里逐段显示。"}</div>
             )}
@@ -4144,6 +4347,44 @@ function defaultClipExportOptions(title: string): ClipRenderOptions {
     logo_asset_id: null,
     logo_position: "top_right",
   };
+}
+
+function defaultClipEditorState(title: string) {
+  return {
+    currentTime: 0,
+    exportOptions: defaultClipExportOptions(title),
+    form: {
+      start_seconds: "0",
+      end_seconds: "15",
+      label: "PR 短切片段",
+      note: "",
+      quote: "",
+    },
+    transcriptSearch: "",
+  };
+}
+
+function jobTypeLabel(type: string): string {
+  return {
+    daily_discovery: "采访抓取",
+    download_translate: "下载与翻译",
+    render_clips: "序列导出",
+    sync_bilibili: "B站同步",
+    sync_youtube: "YouTube 同步",
+    subtitle_reprocess: "字幕重处理",
+  }[type] ?? type;
+}
+
+function formatJobTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "时间未知";
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function outputProfileLabel(profile: ClipRenderOptions["output_profile"]): string {
