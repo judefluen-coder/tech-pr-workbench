@@ -264,6 +264,15 @@ npm run test:backend
 npm run build:frontend
 ```
 
+项目运行时还可以执行服务冒烟检查：
+
+```bash
+npm run smoke
+SMOKE_VIDEO_ID=<本地视频编号> npm run smoke
+```
+
+完整发布步骤见 [Local Studio v1 Release Checklist](docs/RELEASE_CHECKLIST.md)，启动、OpenCLI、下载和导出问题见 [Troubleshooting](docs/TROUBLESHOOTING.md)。
+
 ## 常见问题
 
 ### 没有 YouTube API key 能用吗？

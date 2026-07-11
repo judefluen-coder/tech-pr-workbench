@@ -38,7 +38,8 @@ Authentication, billing, real-time collaboration, multi-track editing, complex t
    - Added task-to-video context and retry actions, plus progressive long-transcript rendering that keeps the active caption available.
    - Verified desktop and mobile layouts, including internal task scrolling and export-modal overflow behavior.
 
-5. **Release verification** — Planned
-   - Cover real discovery/download, restart recovery, and video export.
-   - Add browser smoke tests and clean-machine setup verification.
-   - Finish troubleshooting and user documentation for the v1 release.
+5. **Release verification** — Complete
+   - Verified persisted YouTube/Bilibili discovery and download results, worker restart behavior, and a real 5-second 1920×1080 H.264/AAC export with burned Chinese subtitles.
+   - Added a repeatable service and local-media smoke command, then passed installation, startup, tests, and production build from a dependency-free temporary checkout.
+   - Completed desktop and 390px browser checks for discovery, tasks, editor state restoration, long transcripts, and the export dialog.
+   - Added release and troubleshooting documentation for setup, OpenCLI windows, discovery, download, worker, and export failures.
