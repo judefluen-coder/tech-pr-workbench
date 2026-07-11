@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from html import unescape
 from pathlib import Path
 from typing import Literal
 
@@ -111,16 +112,22 @@ def parse_transcript_text(text: str) -> list[dict]:
     return segments
 
 
+def normalize_transcript_segments(segments: list[dict]) -> list[dict]:
+    return _collapse_rolling_subtitle_segments(segments)
+
+
 def _parse_timed_text(text: str) -> list[dict]:
-    blocks = re.split(r"\n\s*\n", text.replace("\ufeff", ""))
+    lines = text.replace("\ufeff", "").splitlines()
+    timing_indexes = [index for index, line in enumerate(lines) if "-->" in line]
     segments: list[dict] = []
-    for block in blocks:
-        lines = [line.strip() for line in block.splitlines() if line.strip() and line.strip().upper() != "WEBVTT"]
-        timing_index = next((idx for idx, line in enumerate(lines) if "-->" in line), None)
-        if timing_index is None:
-            continue
-        start_raw, end_raw = [part.strip().split(" ")[0] for part in lines[timing_index].split("-->", 1)]
-        body = _clean_subtitle_text(" ".join(lines[timing_index + 1 :]).strip())
+    for position, timing_index in enumerate(timing_indexes):
+        timing_line = lines[timing_index].strip()
+        next_timing_index = timing_indexes[position + 1] if position + 1 < len(timing_indexes) else len(lines)
+        body_lines = [line.strip() for line in lines[timing_index + 1 : next_timing_index] if line.strip()]
+        if body_lines and body_lines[-1].isdigit():
+            body_lines.pop()
+        start_raw, end_raw = [part.strip().split(" ")[0] for part in timing_line.split("-->", 1)]
+        body = _clean_subtitle_text(" ".join(body_lines))
         if body:
             segments.append(
                 {
@@ -129,7 +136,46 @@ def _parse_timed_text(text: str) -> list[dict]:
                     "text": body,
                 }
             )
-    return segments
+    return normalize_transcript_segments(segments)
+
+
+def _collapse_rolling_subtitle_segments(segments: list[dict]) -> list[dict]:
+    collapsed: list[dict] = []
+    previous: dict | None = None
+    for segment in segments:
+        start = float(segment["start_seconds"])
+        end = float(segment["end_seconds"])
+        text = _clean_subtitle_text(segment.get("text", ""))
+        if not text or end <= start:
+            previous = {"start_seconds": start, "end_seconds": end, "text": text}
+            continue
+
+        novel_text = text
+        if previous and start - float(previous["end_seconds"]) <= 0.08:
+            previous_text = str(previous.get("text") or "")
+            if end - start <= 0.05 and (text == previous_text or text in previous_text or previous_text in text):
+                novel_text = ""
+            elif text != previous_text:
+                novel_text = _trim_rolling_overlap(previous_text, text)
+
+        if novel_text:
+            collapsed.append({"start_seconds": start, "end_seconds": end, "text": novel_text})
+        previous = {"start_seconds": start, "end_seconds": end, "text": text}
+    return collapsed
+
+
+def _trim_rolling_overlap(previous: str, current: str) -> str:
+    previous_tokens = previous.split()
+    current_tokens = current.split()
+    max_overlap = min(len(previous_tokens), len(current_tokens))
+    for size in range(max_overlap, 0, -1):
+        previous_tail = [token.casefold() for token in previous_tokens[-size:]]
+        current_head = [token.casefold() for token in current_tokens[:size]]
+        overlap_chars = sum(len(token) for token in current_tokens[:size])
+        if previous_tail == current_head and (size >= 2 or overlap_chars >= 12):
+            remainder = " ".join(current_tokens[size:]).strip()
+            return remainder or current
+    return current
 
 
 def _parse_timestamp(value: str) -> float:
@@ -279,9 +325,12 @@ def _install_argos_package(from_code: LanguageCode, to_code: LanguageCode) -> No
 
 
 def _clean_subtitle_text(text: str) -> str:
+    text = re.sub(r"&\s*(amp|gt|lt|quot|apos)\s*;", r"&\1;", text, flags=re.IGNORECASE)
+    text = unescape(text)
     text = re.sub(r"<\d{2}:\d{2}:\d{2}\.\d{3}>", "", text)
     text = re.sub(r"</?c>", "", text)
     text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\s*>\s*>\s*", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 

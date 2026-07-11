@@ -4,13 +4,15 @@ import json
 import re
 from pathlib import Path
 
-from app.ai import parse_transcript_text, save_transcript_segments, transcribe_and_translate, translate_segments_to_zh
+from app.ai import normalize_transcript_segments, parse_transcript_text, save_transcript_segments, transcribe_and_translate, translate_segments_to_zh
 from app.bilibili import download_bilibili_authorized, fetch_bilibili_subtitle_segments
 from app.config import settings
 from app.db import get_connection, now_iso, row_to_dict
-from app.downloads import run_authorized_download
+from app.downloads import find_downloaded_subtitles, run_authorized_download
 from app.scoring import people_signals_for_video, priority_score
 from app.summaries import build_transcript_summary
+
+CLIP_MARK_ORDER_SQL = "position IS NULL, position, start_seconds, id"
 
 
 def create_download_translate_job(video_id: int, authorization_note: str = "", quality: str = "1080p") -> dict:
@@ -99,6 +101,61 @@ def run_download_translate_job(job_id: int, video_id: int, authorization_note: s
         _mark_failed(job_id, video_id, str(exc))
 
 
+def create_subtitle_reprocess_job(video_id: int) -> dict:
+    timestamp = now_iso()
+    with get_connection() as conn:
+        video = conn.execute("SELECT id FROM videos WHERE id = ?", (video_id,)).fetchone()
+        if not video:
+            raise ValueError("视频不存在。")
+        cursor = conn.execute(
+            """
+            INSERT INTO jobs (type, status, message, payload, created_at, updated_at)
+            VALUES ('subtitle_reprocess', 'queued', '已加入字幕重处理队列', ?, ?, ?)
+            """,
+            (json.dumps({"video_id": video_id}, ensure_ascii=False), timestamp, timestamp),
+        )
+        job_id = cursor.lastrowid
+    return {"job_id": job_id, "video_id": video_id, "message": "已开始重新处理字幕。"}
+
+
+def run_subtitle_reprocess_job(job_id: int, video_id: int) -> None:
+    try:
+        video = _get_video(video_id)
+        _update_job(job_id, "running", "正在读取已有字幕并清理重复片段", video_id)
+        subtitles = find_downloaded_subtitles(video_id)
+
+        if subtitles.get("zh"):
+            zh_segments = _segments_from_subtitle(subtitles["zh"])
+            en_segments = _segments_from_subtitle(subtitles["en"]) if subtitles.get("en") else []
+            en_source = "reprocessed_downloaded_subtitle"
+            zh_source = "reprocessed_downloaded_zh_subtitle"
+        elif subtitles.get("en"):
+            en_segments = _segments_from_subtitle(subtitles["en"])
+            _update_job(job_id, "running", "字幕已清理，正在重新生成中文翻译", video_id)
+            zh_segments = translate_segments_to_zh(en_segments)
+            en_source = "reprocessed_downloaded_en_subtitle"
+            zh_source = "reprocessed_local_translation"
+        else:
+            en_segments, zh_segments = _stored_transcript_segments(video_id)
+            if en_segments:
+                _update_job(job_id, "running", "没有找到原字幕文件，正在根据已有英文字幕重新翻译", video_id)
+                zh_segments = translate_segments_to_zh(en_segments)
+                en_source = "reprocessed_stored_transcript"
+                zh_source = "reprocessed_local_translation"
+            elif zh_segments:
+                en_source = "none"
+                zh_source = "reprocessed_stored_subtitle"
+            else:
+                raise RuntimeError("没有可重新处理的字幕，请先下载视频或导入字幕。")
+
+        final_status = _status_after_subtitle_reprocess(video_id, video.get("status", ""))
+        save_transcript_segments(video_id, en_segments, zh_segments, en_source, zh_source, final_status)
+        _finish_translated_video(video_id, zh_segments, final_status)
+        _update_job(job_id, "completed", f"字幕已重新处理：{len(zh_segments)} 条中文，{len(en_segments)} 条英文", video_id)
+    except Exception as exc:
+        _mark_reprocess_failed(job_id, video_id, str(exc))
+
+
 def get_job(job_id: int) -> dict:
     with get_connection() as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -118,10 +175,10 @@ def clip_payload(video_id: int) -> dict:
         ]
         clips = [
             row_to_dict(row)
-            for row in conn.execute("SELECT * FROM clip_marks WHERE video_id = ? ORDER BY start_seconds", (video_id,)).fetchall()
+            for row in conn.execute(f"SELECT * FROM clip_marks WHERE video_id = ? ORDER BY {CLIP_MARK_ORDER_SQL}", (video_id,)).fetchall()
         ]
         assets = [
-            row_to_dict(row)
+            media_asset_with_url(row_to_dict(row))
             for row in conn.execute("SELECT * FROM media_assets WHERE video_id = ? ORDER BY id DESC", (video_id,)).fetchall()
         ]
     media_asset = next((asset for asset in assets if asset["kind"] == "media" and asset.get("stored_path")), None)
@@ -130,7 +187,7 @@ def clip_payload(video_id: int) -> dict:
         "transcripts": transcripts,
         "clip_marks": clips,
         "media_assets": assets,
-        "media_url": _media_url(media_asset["stored_path"]) if media_asset else "",
+        "media_url": media_asset.get("url", "") if media_asset else "",
     }
 
 
@@ -140,6 +197,20 @@ def _segments_from_subtitle(path: str) -> list[dict]:
     if not segments:
         raise RuntimeError(f"字幕文件无法解析：{Path(path).name}")
     return segments
+
+
+def _stored_transcript_segments(video_id: int) -> tuple[list[dict], list[dict]]:
+    with get_connection() as conn:
+        rows = [
+            row_to_dict(row)
+            for row in conn.execute(
+                "SELECT language, start_seconds, end_seconds, text FROM transcripts WHERE video_id = ? ORDER BY language, start_seconds",
+                (video_id,),
+            ).fetchall()
+        ]
+    en_segments = normalize_transcript_segments([row for row in rows if row["language"] == "en"])
+    zh_segments = normalize_transcript_segments([row for row in rows if row["language"] == "zh"])
+    return en_segments, zh_segments
 
 
 def _get_video(video_id: int) -> dict:
@@ -208,19 +279,27 @@ def _demo_segments(video: dict) -> list[dict]:
     ]
 
 
-def _finish_translated_video(video_id: int, zh_segments: list[dict]) -> None:
+def _finish_translated_video(video_id: int, zh_segments: list[dict], status: str = "clip_ready") -> None:
     summary = build_transcript_summary(zh_segments)
     matched_names, candidate_people, reason, score = _people_signals_after_transcript(video_id)
     with get_connection() as conn:
         conn.execute(
             """
             UPDATE videos
-            SET status = 'clip_ready', summary = ?, matched_people = ?, candidate_people = ?,
+            SET status = ?, summary = ?, matched_people = ?, candidate_people = ?,
                 people_match_reason = ?, priority_score = ?, last_error = '', updated_at = ?
             WHERE id = ?
             """,
-            (summary, matched_names, candidate_people, reason, score, now_iso(), video_id),
+            (status, summary, matched_names, candidate_people, reason, score, now_iso(), video_id),
         )
+
+
+def _status_after_subtitle_reprocess(video_id: int, current_status: str) -> str:
+    if current_status == "exported":
+        return "exported"
+    with get_connection() as conn:
+        has_clips = conn.execute("SELECT 1 FROM clip_marks WHERE video_id = ? LIMIT 1", (video_id,)).fetchone()
+    return "clipped" if has_clips else "clip_ready"
 
 
 def _promote_translated_to_clip_ready(video_id: int) -> None:
@@ -294,6 +373,23 @@ def _mark_failed(job_id: int, video_id: int, message: str) -> None:
         )
 
 
+def _mark_reprocess_failed(job_id: int, video_id: int, message: str) -> None:
+    timestamp = now_iso()
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET status = 'failed', message = ?, updated_at = ? WHERE id = ?",
+            (message, timestamp, job_id),
+        )
+        conn.execute(
+            "UPDATE videos SET last_error = ?, updated_at = ? WHERE id = ?",
+            (message, timestamp, video_id),
+        )
+
+
+def media_asset_with_url(asset: dict) -> dict:
+    return {**asset, "url": _media_url(asset.get("stored_path", ""))}
+
+
 def _media_url(path: str) -> str:
     media_path = Path(path)
     try:
@@ -304,5 +400,10 @@ def _media_url(path: str) -> str:
     try:
         relative = media_path.relative_to(settings.upload_dir)
         return f"/media/uploads/{relative.as_posix()}"
+    except ValueError:
+        pass
+    try:
+        relative = media_path.relative_to(settings.export_dir)
+        return f"/media/exports/{relative.as_posix()}"
     except ValueError:
         return ""

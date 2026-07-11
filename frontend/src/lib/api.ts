@@ -45,12 +45,18 @@ export const api = {
     request<{ message: string }>(`/api/videos/${id}/download`, { method: "POST", body: JSON.stringify(payload) }),
   downloadTranslate: (id: number, payload: { authorization_note?: string; quality?: string } = {}) =>
     request<{ job_id: number; video_id: number; message: string }>(`/api/items/${id}/download-translate`, { method: "POST", body: JSON.stringify(payload) }),
+  reprocessSubtitles: (id: number) =>
+    request<{ job_id: number; video_id: number; message: string }>(`/api/items/${id}/reprocess-subtitles`, { method: "POST" }),
   clipPayload: (id: number) => request<ClipPayload>(`/api/items/${id}/clip`),
-  renderClips: (id: number, payload: { destination: string; output_dir?: string; filename?: string }) =>
+  renderClips: (id: number, payload: { destination: string; output_dir?: string; filename?: string; target_duration_seconds?: number; clip_status_filter?: string }) =>
     request<ClipRenderResult>(`/api/items/${id}/render-clips`, { method: "POST", body: JSON.stringify(payload) }),
   deleteClip: (id: number) => request<{ message: string }>(`/api/clip-marks/${id}`, { method: "DELETE" }),
+  updateClip: (id: number, payload: Pick<ClipMark, "start_seconds" | "end_seconds" | "label" | "note" | "quote" | "status">) =>
+    request<ClipMark>(`/api/clip-marks/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  reorderClips: (videoId: number, clipMarkIds: number[]) =>
+    request<{ message: string; clip_marks: ClipMark[] }>(`/api/items/${videoId}/clip-order`, { method: "POST", body: JSON.stringify({ clip_mark_ids: clipMarkIds }) }),
   importMedia: (form: FormData) => request<{ message: string }>("/api/media/import", { method: "POST", body: form }),
   transcribe: (id: number) => request<{ message: string; segments: number }>(`/api/videos/${id}/transcribe`, { method: "POST" }),
-  createClip: (payload: Omit<ClipMark, "id" | "created_at" | "updated_at">) =>
+  createClip: (payload: Omit<ClipMark, "id" | "position" | "created_at" | "updated_at">) =>
     request<ClipMark>("/api/clip-marks", { method: "POST", body: JSON.stringify(payload) }),
 };

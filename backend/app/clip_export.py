@@ -10,8 +10,17 @@ from app.config import settings
 from app.db import get_connection, now_iso, row_to_dict
 from app.exports import segments_to_srt
 
+CLIP_MARK_ORDER_SQL = "position IS NULL, position, start_seconds, id"
 
-def render_clip_marks(video_id: int, destination: str = "downloads", destination_dir: str = "", filename: str = "") -> dict:
+
+def render_clip_marks(
+    video_id: int,
+    destination: str = "downloads",
+    destination_dir: str = "",
+    filename: str = "",
+    target_duration_seconds: float = 0,
+    clip_status_filter: str = "all",
+) -> dict:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("未找到 ffmpeg，无法导出片段视频。")
@@ -25,7 +34,7 @@ def render_clip_marks(video_id: int, destination: str = "downloads", destination
             raise ValueError("视频不存在。")
         marks = [
             row_to_dict(row)
-            for row in conn.execute("SELECT * FROM clip_marks WHERE video_id = ? ORDER BY start_seconds", (video_id,)).fetchall()
+            for row in conn.execute(f"SELECT * FROM clip_marks WHERE video_id = ? ORDER BY {CLIP_MARK_ORDER_SQL}", (video_id,)).fetchall()
         ]
         transcripts = [
             row_to_dict(row)
@@ -46,8 +55,15 @@ def render_clip_marks(video_id: int, destination: str = "downloads", destination
 
     if not marks:
         raise ValueError("还没有保存剪辑点。")
+    marks = _filter_export_marks(marks, clip_status_filter)
+    if not marks:
+        raise ValueError("还没有已确认的剪辑片段。")
     if not media:
         raise FileNotFoundError("还没有本地视频文件。")
+
+    planned_marks = _plan_export_marks(marks, target_duration_seconds)
+    if not planned_marks:
+        raise ValueError("目标时长太短，无法生成有效片段。")
 
     source = Path(media["stored_path"])
     if not source.exists():
@@ -59,10 +75,12 @@ def render_clip_marks(video_id: int, destination: str = "downloads", destination
 
     exported = []
     burned_subtitle_count = 0
-    for index, mark in enumerate(marks, start=1):
+    rendered_duration_seconds = 0.0
+    for index, mark in enumerate(planned_marks, start=1):
         start = max(float(mark["start_seconds"]), 0)
         end = max(float(mark["end_seconds"]), start + 0.1)
         duration = max(end - start, 0.1)
+        rendered_duration_seconds += duration
         label = _slugify(mark.get("label") or f"clip-{index}")
         output = output_dir / f"{index:02d}-{_time_slug(start)}-{_time_slug(end)}-{label}.mp4"
         subtitle_segments = _compact_subtitle_segments(_clip_subtitle_segments(transcripts, start, end))
@@ -147,8 +165,10 @@ def render_clip_marks(video_id: int, destination: str = "downloads", destination
     sequence_url = ""
     saved_path = ""
     if exported:
-        sequence_path = output_dir / "sequence.mp4"
-        list_file = output_dir / "sequence.txt"
+        scope_suffix = "-approved" if _normalized_clip_status_filter(clip_status_filter) == "approved" else ""
+        duration_suffix = f"-{int(target_duration_seconds)}s" if target_duration_seconds > 0 else ""
+        sequence_path = output_dir / f"sequence{scope_suffix}{duration_suffix}.mp4"
+        list_file = output_dir / f"sequence{scope_suffix}{duration_suffix}.txt"
         list_file.write_text("".join(f"file '{Path(item['path']).as_posix()}'\n" for item in exported), encoding="utf-8")
         sequence_command = [
             ffmpeg,
@@ -174,9 +194,11 @@ def render_clip_marks(video_id: int, destination: str = "downloads", destination
     with get_connection() as conn:
         conn.execute("UPDATE videos SET status = 'exported', updated_at = ? WHERE id = ?", (now_iso(), video_id))
 
-    message = f"已导出 {len(exported)} 个带中文字幕的片段视频，并生成合成序列。"
+    duration_note = f"（{int(target_duration_seconds)} 秒版本）" if target_duration_seconds > 0 else ""
+    approved_only = _normalized_clip_status_filter(clip_status_filter) == "approved"
+    message = f"已导出 {len(exported)} 个{'已确认且' if approved_only else ''}带中文字幕的片段视频，并生成合成序列{duration_note}。"
     if burned_subtitle_count < len(exported):
-        message = f"已导出 {len(exported)} 个片段视频，其中 {burned_subtitle_count} 个已烧录中文字幕，并生成合成序列。"
+        message = f"已导出 {len(exported)} 个{'已确认' if approved_only else ''}片段视频，其中 {burned_subtitle_count} 个已烧录中文字幕，并生成合成序列{duration_note}。"
 
     return {
         "message": message,
@@ -184,6 +206,9 @@ def render_clip_marks(video_id: int, destination: str = "downloads", destination
         "sequence_path": str(sequence_path) if sequence_path else "",
         "sequence_url": sequence_url,
         "saved_path": saved_path,
+        "target_duration_seconds": target_duration_seconds,
+        "clip_status_filter": _normalized_clip_status_filter(clip_status_filter),
+        "rendered_duration_seconds": round(rendered_duration_seconds, 3),
         "clips": exported,
     }
 
@@ -228,6 +253,44 @@ def _dedupe_path(path: Path) -> Path:
         if not candidate.exists():
             return candidate
     return path.with_name(f"{stem}-{datetime.now().strftime('%H%M%S')}{suffix}")
+
+
+def _plan_export_marks(marks: list[dict], target_duration_seconds: float = 0) -> list[dict]:
+    if target_duration_seconds <= 0:
+        return [dict(mark) for mark in marks]
+    remaining = float(target_duration_seconds)
+    planned: list[dict] = []
+    for mark in marks:
+        start = max(float(mark["start_seconds"]), 0)
+        end = max(float(mark["end_seconds"]), start)
+        duration = end - start
+        if duration <= 0:
+            continue
+        if remaining <= 0.1:
+            break
+        planned_mark = dict(mark)
+        planned_duration = min(duration, remaining)
+        planned_mark["start_seconds"] = start
+        planned_mark["end_seconds"] = start + planned_duration
+        planned.append(planned_mark)
+        remaining -= planned_duration
+    return planned
+
+
+def _filter_export_marks(marks: list[dict], clip_status_filter: str = "all") -> list[dict]:
+    normalized = _normalized_clip_status_filter(clip_status_filter)
+    if normalized == "all":
+        return [dict(mark) for mark in marks]
+    return [dict(mark) for mark in marks if mark.get("status") == "approved"]
+
+
+def _normalized_clip_status_filter(value: str) -> str:
+    normalized = (value or "all").strip().lower()
+    if normalized in {"", "all"}:
+        return "all"
+    if normalized == "approved":
+        return "approved"
+    raise ValueError("无效导出范围。")
 
 
 def _clip_subtitle_segments(transcripts: list[dict], start: float, end: float) -> list[dict]:

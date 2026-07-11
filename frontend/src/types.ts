@@ -114,6 +114,7 @@ export interface ClipMark {
   label: string;
   note: string;
   quote: string;
+  position: number;
   status: string;
   created_at: string;
   updated_at: string;
@@ -123,10 +124,12 @@ export interface MediaAsset {
   id: number;
   kind: string;
   original_filename: string;
+  stored_path: string;
   authorization_note: string;
   delete_after_processing: number;
   processing_status: string;
   created_at: string;
+  url: string;
 }
 
 export interface VideoDetail {
@@ -155,6 +158,9 @@ export interface ClipRenderResult {
   sequence_path: string;
   sequence_url: string;
   saved_path: string;
+  target_duration_seconds: number;
+  clip_status_filter: string;
+  rendered_duration_seconds: number;
   clips: RenderedClip[];
 }
 

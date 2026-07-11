@@ -25,6 +25,19 @@ class ClipMarkCreate(BaseModel):
     status: str = "draft"
 
 
+class ClipMarkUpdate(BaseModel):
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(gt=0)
+    label: str
+    note: str = ""
+    quote: str = ""
+    status: str = "ready"
+
+
+class ClipMarkReorder(BaseModel):
+    clip_mark_ids: list[int]
+
+
 class YoutubeSyncRequest(BaseModel):
     days_back: int = Field(default=1, ge=1, le=30)
     limit_per_query: int = Field(default=8, ge=1, le=25)
@@ -54,6 +67,8 @@ class RenderClipsRequest(BaseModel):
     destination: str = Field(default="downloads")
     output_dir: str = ""
     filename: str = ""
+    target_duration_seconds: float = Field(default=0, ge=0, le=600)
+    clip_status_filter: str = Field(default="all")
 
 
 class AutomationRequest(BaseModel):
