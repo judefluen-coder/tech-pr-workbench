@@ -807,6 +807,7 @@ function ClipWorkspace({
   const [savingClip, setSavingClip] = useState(false);
   const [renderResult, setRenderResult] = useState<ClipRenderResult | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [advancedToolsOpen, setAdvancedToolsOpen] = useState(false);
   const [exportOptions, setExportOptions] = useState<ClipRenderOptions>(() => defaultClipExportOptions(""));
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadedLogo, setUploadedLogo] = useState<MediaAsset | null>(null);
@@ -1875,27 +1876,50 @@ function ClipWorkspace({
         </div>
       )}
 
-      <ClipCommandCenter
-        canEdit={canEdit}
-        clipMarks={clipMarks}
-        currentTime={currentTime}
-        exportChecks={exportPreflightChecks}
-        hasMedia={hasMedia}
-        ready={ready}
-        rowsCount={rows.length}
-        saving={savingClip}
-        selectionEnd={Number(form.end_seconds)}
-        selectionStart={Number(form.start_seconds)}
-        sequenceDuration={sequenceDuration}
-        suggestionsCount={suggestions.length}
-        onApplyActiveCaption={applyActiveCaption}
-        onApplyPreset={applyPresetFromPlayhead}
-        onJumpCaption={jumpCaption}
-        onOpenExport={() => openExportDialog()}
-        onSetStart={() => setPointFromPlayhead("start_seconds")}
-        onFinishSelection={finishSelectionAtPlayhead}
-      />
-      <DeliveryChecklistPanel items={deliveryChecklistItems} />
+      <div className="simple-workflow-bar" aria-label="剪辑流程">
+        <div className={`simple-workflow-step ${rows.length ? "done" : "active"}`}>
+          <span>1</span>
+          <div><strong>选择片段</strong><small>{rows.length ? `${rows.length} 条字幕可选` : "等待字幕"}</small></div>
+        </div>
+        <div className={`simple-workflow-step ${clipMarks.length ? "done" : rows.length ? "active" : ""}`}>
+          <span>2</span>
+          <div><strong>整理顺序</strong><small>{clipMarks.length ? `${clipMarks.length} 段 · ${formatDuration(sequenceDuration)}` : "尚未加入片段"}</small></div>
+        </div>
+        <div className={`simple-workflow-step ${exportedSequenceCount ? "done" : clipMarks.length ? "active" : ""}`}>
+          <span>3</span>
+          <div><strong>导出成片</strong><small>{exportedSequenceCount ? `已有 ${exportedSequenceCount} 个成片` : "确认顺序后导出"}</small></div>
+        </div>
+        <button className="advanced-tools-toggle" type="button" aria-expanded={advancedToolsOpen} onClick={() => setAdvancedToolsOpen((open) => !open)}>
+          {advancedToolsOpen ? <CaretUp size={15} /> : <CaretDown size={15} />}
+          {advancedToolsOpen ? "收起工具" : "更多工具"}
+        </button>
+      </div>
+
+      {advancedToolsOpen && (
+        <div className="advanced-tools-panel">
+          <ClipCommandCenter
+            canEdit={canEdit}
+            clipMarks={clipMarks}
+            currentTime={currentTime}
+            exportChecks={exportPreflightChecks}
+            hasMedia={hasMedia}
+            ready={ready}
+            rowsCount={rows.length}
+            saving={savingClip}
+            selectionEnd={Number(form.end_seconds)}
+            selectionStart={Number(form.start_seconds)}
+            sequenceDuration={sequenceDuration}
+            suggestionsCount={suggestions.length}
+            onApplyActiveCaption={applyActiveCaption}
+            onApplyPreset={applyPresetFromPlayhead}
+            onJumpCaption={jumpCaption}
+            onOpenExport={() => openExportDialog()}
+            onSetStart={() => setPointFromPlayhead("start_seconds")}
+            onFinishSelection={finishSelectionAtPlayhead}
+          />
+          <DeliveryChecklistPanel items={deliveryChecklistItems} />
+        </div>
+      )}
 
       <div className="clip-grid">
         <div className="player-panel">
@@ -1941,7 +1965,7 @@ function ClipWorkspace({
                 onSeek={seekTo}
                 onPreviewSuggestion={(suggestion) => seekTo(suggestion.start)}
               />
-              <SequenceReviewPanel
+              {advancedToolsOpen && <SequenceReviewPanel
                 currentTime={currentTime}
                 marks={clipMarks}
                 reviewingClipId={reviewingClipId}
@@ -1955,7 +1979,7 @@ function ClipWorkspace({
                 onApproveAndNext={approveClipAndContinue}
                 onSetStatus={setClipStatusInSequence}
                 onStop={() => stopSequenceReview(true)}
-              />
+              />}
               <div className="transport-panel">
                 <div>
                   <span>当前播放</span>
@@ -2006,7 +2030,7 @@ function ClipWorkspace({
             </div>
           )}
           <HighlightPanel addableCount={addableSuggestionCount} suggestions={suggestions} onAdd={addSuggestionToSequence} onAddAll={addAllSuggestionsToSequence} onSeek={seekTo} saving={savingClip} />
-          <div className="manual-clip-panel">
+          {advancedToolsOpen && <div className="manual-clip-panel">
             <div className="manual-clip-head">
               <div>
                 <h3>手动片段</h3>
@@ -2041,10 +2065,10 @@ function ClipWorkspace({
                 {canEdit ? "加入剪辑序列" : "等待字幕就绪"}
               </button>
             </form>
-          </div>
+          </div>}
           <ExportResult result={renderResult} summary={deliverySummary} onCopyBrief={copyDeliveryBrief} />
-          <ExportedAssetsPanel assets={clip?.media_assets ?? []} />
-          <DeliveryBriefPanel
+          {advancedToolsOpen && <ExportedAssetsPanel assets={clip?.media_assets ?? []} />}
+          {advancedToolsOpen && <DeliveryBriefPanel
             brief={deliveryBrief}
             marksCount={clipMarks.length}
             nextStep={deliveryNextStep}
@@ -2052,7 +2076,7 @@ function ClipWorkspace({
             summary={deliverySummary}
             onCopy={copyDeliveryBrief}
             onNextStep={runDeliveryNextStep}
-          />
+          />}
         </div>
 
         <div className="transcript-panel">
@@ -2139,6 +2163,7 @@ function ClipWorkspace({
         </div>
 
         <ClipSequence
+          simple={!advancedToolsOpen}
           currentTime={currentTime}
           duration={timelineDuration}
           focusRequest={sequenceFocusRequest}
@@ -3131,6 +3156,7 @@ function ClipTrimEditor({
 }
 
 function ClipSequence({
+  simple,
   bulkStatus,
   copyableClipCount,
   currentTime,
@@ -3155,6 +3181,7 @@ function ClipSequence({
   onSeek,
   onUpdate,
 }: {
+  simple: boolean;
   bulkStatus: string | null;
   copyableClipCount: number;
   currentTime: number;
@@ -3728,13 +3755,13 @@ function ClipSequence({
   const editingDraftChanged = editingMark ? draftHasChanges(editingMark) : false;
 
   return (
-    <div className="marks-panel">
+    <div className={`marks-panel ${simple ? "simple-sequence" : ""}`}>
       <div className="transcript-head sequence-panel-head">
         <div>
           <h3>剪辑序列</h3>
           <span>{marks.length ? `${marks.length} 段 · ${formatDuration(totalSeconds)} · ${approvedCount}/${marks.length} 已确认` : "空序列"}</span>
         </div>
-        {marks.length ? (
+        {marks.length && !simple ? (
           <div className="sequence-bulk-actions" aria-label="批量审片状态">
             <button disabled={isChronological || Boolean(reorderingId) || Boolean(savingId) || savingNew || Boolean(editingId)} type="button" onClick={sortByTime}>
               {reorderingId ? <SpinnerGap size={13} className="spin" /> : <Clock size={13} />}
@@ -3755,7 +3782,7 @@ function ClipSequence({
           </div>
         ) : null}
       </div>
-      {marks.length ? (
+      {marks.length && !simple ? (
         <div className={`sequence-quality-panel ${sequenceQuality.severity}`}>
           <div className="sequence-quality-head">
             <strong>{sequenceQuality.message}</strong>
@@ -3787,7 +3814,7 @@ function ClipSequence({
           )}
         </div>
       ) : null}
-      {marks.length ? (
+      {marks.length && !simple ? (
         <div className="sequence-filter-bar" aria-label="筛选剪辑序列">
           {SEQUENCE_FILTERS.map((filter) => (
             <button
@@ -3803,7 +3830,7 @@ function ClipSequence({
           ))}
         </div>
       ) : null}
-      {isFiltered && displayedMarks.length ? (
+      {!simple && isFiltered && displayedMarks.length ? (
         <div className="sequence-filter-context">
           <span>
             {activeFilter.label} {displayedMarks.length} 段 · 当前队列
@@ -4141,7 +4168,7 @@ function ClipSequence({
                       <span className="drag-handle" title={dragHandleTitle} aria-hidden="true">
                         <DotsSixVertical size={16} weight="bold" />
                       </span>
-                      <ClipStatusBadge status={mark.status} />
+                      {!simple && <ClipStatusBadge status={mark.status} />}
                       <span className="mark-row-time">
                         #{sequenceNumber} · {formatTimecode(mark.start_seconds)} - {formatTimecode(mark.end_seconds)}
                       </span>
@@ -4150,7 +4177,7 @@ function ClipSequence({
                   </div>
                   <strong>{mark.label || "未命名片段"}</strong>
                   <p>{mark.note || mark.quote || "无备注"}</p>
-                  {markIssues.length || copyGaps.length ? (
+                  {!simple && (markIssues.length || copyGaps.length) ? (
                     <div className="mark-quality-flags" aria-label="片段质量提示">
                       {copyGaps.length ? (
                         <button className="copy" type="button" onClick={() => focusMarkForEdit(mark)}>
@@ -4164,7 +4191,7 @@ function ClipSequence({
                       ))}
                     </div>
                   ) : null}
-                  <div className="clip-status-actions" aria-label="片段审片状态">
+                  {!simple && <div className="clip-status-actions" aria-label="片段审片状态">
                     {CLIP_REVIEW_STATUSES.map((status) => (
                       <button
                         className={mark.status === status.value ? "active" : ""}
@@ -4177,7 +4204,7 @@ function ClipSequence({
                         {status.label}
                       </button>
                     ))}
-                  </div>
+                  </div>}
                   <div className="sequence-actions">
                     <button type="button" title={moveTitle} onClick={() => onMove(mark.id, -1)} disabled={!canMoveUp || reorderingId === mark.id}>
                       {reorderingId === mark.id ? <SpinnerGap size={14} className="spin" /> : <CaretUp size={14} />}
@@ -4191,14 +4218,14 @@ function ClipSequence({
                       <PlayCircle size={14} />
                       预览
                     </button>
-                    <button type="button" onClick={() => editMark(mark)} disabled={editLocked} title={editLocked ? "先保存、还原或放弃当前精修草稿" : "精修片段"}>
+                    {!simple && <button type="button" onClick={() => editMark(mark)} disabled={editLocked} title={editLocked ? "先保存、还原或放弃当前精修草稿" : "精修片段"}>
                       <PencilSimple size={14} />
                       精修
-                    </button>
-                    <button type="button" onClick={() => onDuplicate(mark)} disabled={savingNew}>
+                    </button>}
+                    {!simple && <button type="button" onClick={() => onDuplicate(mark)} disabled={savingNew}>
                       <Copy size={14} />
                       备选
-                    </button>
+                    </button>}
                     <button className="ghost-action" type="button" onClick={() => onDelete(mark.id)}>
                       <Trash size={14} />
                       移除

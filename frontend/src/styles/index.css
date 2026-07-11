@@ -1702,6 +1702,105 @@ body {
   padding: 12px 16px;
 }
 
+.simple-workflow-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+  padding: 10px 16px;
+}
+
+.simple-workflow-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 7px 9px;
+}
+
+.simple-workflow-step > span {
+  display: inline-flex;
+  flex: 0 0 26px;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #cbd5e1;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.simple-workflow-step.active > span {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.simple-workflow-step.done > span {
+  border-color: #b8dfc7;
+  background: var(--good-bg);
+  color: var(--good);
+}
+
+.simple-workflow-step div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.simple-workflow-step strong,
+.simple-workflow-step small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simple-workflow-step strong {
+  font-size: 12px;
+}
+
+.simple-workflow-step small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.advanced-tools-toggle {
+  min-height: 34px;
+  white-space: nowrap;
+}
+
+.advanced-tools-panel {
+  border-bottom: 1px solid var(--line);
+}
+
+.advanced-tools-panel .clip-command-center,
+.advanced-tools-panel .delivery-checklist-panel {
+  border-bottom: 0;
+}
+
+.simple-sequence .mark-row {
+  gap: 7px;
+  padding: 10px;
+}
+
+.simple-sequence .mark-row > p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simple-sequence .sequence-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .clip-command-meter {
   display: grid;
   align-content: center;
@@ -3141,6 +3240,15 @@ label textarea:focus,
     grid-template-columns: 1fr;
   }
 
+  .simple-workflow-bar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .advanced-tools-toggle {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+
   .clip-command-center {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3209,6 +3317,18 @@ label textarea:focus,
 
   .clip-command-center {
     grid-template-columns: 1fr;
+  }
+
+  .simple-workflow-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .simple-workflow-step {
+    padding: 4px 2px;
+  }
+
+  .advanced-tools-toggle {
+    width: 100%;
   }
 
   .readiness-grid,
