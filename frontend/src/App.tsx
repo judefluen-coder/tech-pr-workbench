@@ -28,7 +28,7 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { api } from "./lib/api";
+import { api, isDemoMode } from "./lib/api";
 import { buildTranscriptClipCopy, buildTranscriptSnapForRange, clipCopyGapLabels, isClipCopyIncomplete, mergeMissingClipCopyFields } from "./lib/clipCopy";
 import { buildClipDeliveryBrief, buildClipDeliveryHandoffPrompt, buildClipDeliveryNextStep, buildClipDeliverySummary, type ClipDeliveryNextStep, type ClipDeliverySummary } from "./lib/clipDelivery";
 import { buildExportVersionPreflightCheck } from "./lib/clipPreflight";
@@ -384,6 +384,19 @@ function App() {
           </button>
         </nav>
       </header>
+
+      {isDemoMode && (
+        <section className="demo-mode-bar" aria-label="GitHub Pages 体验版">
+          <div>
+            <strong>GitHub Pages 体验版</strong>
+            <span>当前使用样例数据；抓取、下载与 MP4 导出仅作流程模拟，不会连接平台或上传文件。</span>
+          </div>
+          <a href="https://github.com/judefluen-coder/tech-pr-workbench" target="_blank" rel="noreferrer">
+            <ArrowSquareOut size={15} />
+            本地完整版
+          </a>
+        </section>
+      )}
 
       {activeView === "discovery" && (
         <div className="view-panel" role="tabpanel" aria-label="采访发现">
@@ -960,7 +973,7 @@ function ClipWorkspace({
   }
 
   const ready = video.status === "clip_ready" || video.status === "translated" || video.status === "clipped" || video.status === "exported";
-  const hasMedia = Boolean(clip?.media_url);
+  const hasMedia = isDemoMode || Boolean(clip?.media_url);
   const canEdit = ready && Boolean(clip);
   const transcriptSnapRows = rows.map((row) => ({ end: row.end, start: row.start, text: row.zh?.text || row.en?.text || "" }));
   const buildClipCopyPayload = (mark: ClipMark) => {
@@ -1967,19 +1980,29 @@ function ClipWorkspace({
               </div>
             </>
           ) : (
-            <div className="video-placeholder">
-              <PlayCircle size={34} />
-              <strong>{ready ? "缺少本地视频文件" : "等待本地视频"}</strong>
-              <span>{ready ? "这条视频已有字幕，但还没有下载到本地，无法在工作台内预览画面。" : "点击“下载并翻译”后，完成的视频会在这里播放。"}</span>
-              <div className="placeholder-actions">
-                <button className="primary" onClick={() => onDownloadTranslate(video)} disabled={processing}>
-                  {processing ? <SpinnerGap size={16} className="spin" /> : <DownloadSimple size={16} />}
-                  {processing ? "处理中" : "下载视频"}
-                </button>
-                <a href={video.url} target="_blank" rel="noreferrer">
-                  打开原始链接
-                </a>
-              </div>
+            <div className={`video-placeholder ${isDemoMode ? "demo-video-placeholder" : ""}`}>
+              {isDemoMode ? (
+                <>
+                  <Thumbnail className="demo-video-thumb" url={video.thumbnail_url} />
+                  <strong>体验版样例时间线</strong>
+                  <span>Pages 不加载或上传真实采访视频；字幕、选区、序列和导出设置仍可完整操作。</span>
+                </>
+              ) : (
+                <>
+                  <PlayCircle size={34} />
+                  <strong>{ready ? "缺少本地视频文件" : "等待本地视频"}</strong>
+                  <span>{ready ? "这条视频已有字幕，但还没有下载到本地，无法在工作台内预览画面。" : "点击“下载并翻译”后，完成的视频会在这里播放。"}</span>
+                  <div className="placeholder-actions">
+                    <button className="primary" onClick={() => onDownloadTranslate(video)} disabled={processing}>
+                      {processing ? <SpinnerGap size={16} className="spin" /> : <DownloadSimple size={16} />}
+                      {processing ? "处理中" : "下载视频"}
+                    </button>
+                    <a href={video.url} target="_blank" rel="noreferrer">
+                      打开原始链接
+                    </a>
+                  </div>
+                </>
+              )}
             </div>
           )}
           <HighlightPanel addableCount={addableSuggestionCount} suggestions={suggestions} onAdd={addSuggestionToSequence} onAddAll={addAllSuggestionsToSequence} onSeek={seekTo} saving={savingClip} />

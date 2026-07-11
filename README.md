@@ -26,6 +26,19 @@ npm run dev
 
 打开 `http://127.0.0.1:5173`。后端默认运行在 `http://127.0.0.1:8000`。
 
+## GitHub Pages 体验版
+
+体验版复用同一套前端和工作流，但使用浏览器内存中的样例采访、任务、字幕和剪辑片段。抓取、下载、Logo 上传和 MP4 导出只做交互模拟，不会连接平台、调用本地工具或把文件上传到服务器。
+
+本地预览体验版：
+
+```bash
+npm run build:demo --prefix frontend
+npm run preview:demo --prefix frontend -- --port 4173
+```
+
+打开 `http://127.0.0.1:4173/tech-pr-workbench/`。推送到 `main` 或 `codex/local-studio-v1` 后，`.github/workflows/pages-demo.yml` 会使用 GitHub Actions 构建并发布 Pages。GitHub 官方推荐的自定义 Pages 工作流也是“构建静态文件、上传 Pages artifact、再部署”的结构。
+
 ## 截图导览
 
 ### 1. AI 采访日报
@@ -175,6 +188,8 @@ http://127.0.0.1:5173
 - Worker: 持久处理下载、字幕重处理和视频导出任务
 
 浏览器刷新或服务重启不会丢失排队任务；中断的 worker 任务会在下次启动时自动恢复。失败任务可以在网页状态栏直接重试。
+
+这套本地运行形态参考了 MoneyPrinterTurbo 一类本地 AI 工具的交付方式：浏览器是统一操作面，FastAPI 提供接口，独立 worker 执行耗时媒体任务，SQLite 和 `storage/` 保存进度与文件。用户通常只需要启动一次并留在网页里操作；原生模式适合调用 OpenCLI 浏览器，Docker Compose 适合隔离依赖和迁移到另一台机器。
 
 ## Docker Compose 模式
 

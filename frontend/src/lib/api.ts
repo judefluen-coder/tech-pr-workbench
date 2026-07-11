@@ -1,4 +1,5 @@
 import type { AutomationResult, ClipMark, ClipPayload, ClipRenderOptions, DailyReport, DashboardData, Job, MediaAsset, Person, SystemStatus, Video, VideoDetail, VideoStatus } from "../types";
+import { demoApi } from "./demoApi";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -12,7 +13,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export const api = {
+const liveApi = {
   daily: (params: { date?: string; start_date?: string; end_date?: string } = {}) => {
     const search = new URLSearchParams();
     if (params.date) search.set("date", params.date);
@@ -67,3 +68,6 @@ export const api = {
   createClip: (payload: Omit<ClipMark, "id" | "position" | "created_at" | "updated_at">) =>
     request<ClipMark>("/api/clip-marks", { method: "POST", body: JSON.stringify(payload) }),
 };
+
+export const isDemoMode = import.meta.env.VITE_DEMO_MODE === "true";
+export const api = isDemoMode ? { ...liveApi, ...demoApi } : liveApi;
