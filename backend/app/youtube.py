@@ -4,13 +4,13 @@ from datetime import datetime, timedelta, timezone
 import json
 import shutil
 import subprocess
-import sys
 from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import HTTPException
 
 from app.config import settings
+from app.ytdlp_runtime import require_ytdlp_command
 from app.db import get_connection, now_iso
 from app.opencli_runtime import opencli_window_args, prepare_opencli_browser
 from app.scoring import (
@@ -438,13 +438,7 @@ def _run_ytdlp_search(query: str, limit: int) -> list[dict]:
 
 
 def _ytdlp_command() -> list[str]:
-    configured = settings.ytdlp_path.strip()
-    if configured:
-        resolved = shutil.which(configured)
-        if resolved:
-            return [resolved]
-        return [configured]
-    return [sys.executable, "-m", "yt_dlp"]
+    return require_ytdlp_command()
 
 
 def _upsert_ytdlp_items(items: list[dict], published_after: str | None = None, published_before: str | None = None) -> int:

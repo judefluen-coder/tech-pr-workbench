@@ -3,13 +3,13 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from fastapi import HTTPException
 
 from app.config import settings
 from app.db import get_connection, now_iso, row_to_dict
+from app.ytdlp_runtime import require_ytdlp_command
 
 
 QUALITY_FORMATS = {
@@ -140,13 +140,7 @@ def _add_js_runtime(command: list[str]) -> None:
 
 
 def _ytdlp_command() -> list[str]:
-    configured = settings.ytdlp_path.strip()
-    if configured:
-        resolved = shutil.which(configured)
-        if resolved:
-            return [resolved]
-        return [configured]
-    return [sys.executable, "-m", "yt_dlp"]
+    return require_ytdlp_command()
 
 
 def _download_command(output_template: str, url: str, quality: str, ffmpeg_available: bool) -> list[str]:

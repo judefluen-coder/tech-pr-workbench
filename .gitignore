@@ -13,6 +13,9 @@ storage/tmp/*
 storage/downloads/*
 storage/Downloads/
 storage/Desktop/
+storage/test-exports/
+output/
+.playwright-cli/
 !storage/uploads/.gitkeep
 !storage/exports/.gitkeep
 !storage/tmp/.gitkeep

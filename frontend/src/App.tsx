@@ -309,7 +309,7 @@ function App() {
 
   const startDownloadTranslate = async (video: Video) => {
     setSelectedId(video.id);
-    setToast("正在下载并翻译，完成后会出现在剪辑工作台。");
+    setToast("正在下载视频并准备字幕，完成后会出现在剪辑工作台。");
     try {
       const job = await api.downloadTranslate(video.id, { quality: "1080p" });
       trackJob(video.id, job);
@@ -2007,7 +2007,7 @@ function ClipWorkspace({
                 <>
                   <PlayCircle size={34} />
                   <strong>{ready ? "缺少本地视频文件" : "等待本地视频"}</strong>
-                  <span>{ready ? "这条视频已有字幕，但还没有下载到本地，无法在工作台内预览画面。" : "点击“下载并翻译”后，完成的视频会在这里播放。"}</span>
+                  <span>{ready ? "这条视频已有字幕，但还没有下载到本地，无法在工作台内预览画面。" : "点击“下载视频”后，系统会同时准备可用字幕。"}</span>
                   <div className="placeholder-actions">
                     <button className="primary" onClick={() => onDownloadTranslate(video)} disabled={processing}>
                       {processing ? <SpinnerGap size={16} className="spin" /> : <DownloadSimple size={16} />}
@@ -2138,7 +2138,7 @@ function ClipWorkspace({
                 )}
               </>
             ) : (
-              <div className="transcript-empty">{rows.length ? "没有匹配的字幕段。" : "点击“下载并翻译”后，中文字幕会在这里逐段显示。"}</div>
+              <div className="transcript-empty">{rows.length ? "没有匹配的字幕段。" : "下载视频并完成字幕准备后，中文字幕会在这里逐段显示。"}</div>
             )}
           </div>
             </div>
@@ -2244,38 +2244,6 @@ function ClipWorkspace({
                   </button>
                 ))}
               </div>
-              {exportOptions.output_profile !== "source" && (
-                <>
-                  <div className="export-fit-grid" aria-label="画面适配">
-                    {FIT_MODE_PRESETS.map((preset) => (
-                      <button
-                        className={`export-fit-choice ${exportOptions.fit_mode === preset.value ? "active" : ""}`}
-                        key={preset.value}
-                        type="button"
-                        onClick={() => setExportOptions({ ...exportOptions, fit_mode: preset.value })}
-                      >
-                        {preset.label}
-                        <span>{preset.detail}</span>
-                      </button>
-                    ))}
-                  </div>
-                  {exportOptions.fit_mode === "crop" && (
-                    <label className="export-focus-control">
-                      <span>主体横向位置</span>
-                      <input
-                        aria-label="主体横向位置"
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="1"
-                        value={exportOptions.focus_x}
-                        onChange={(event) => setExportOptions({ ...exportOptions, focus_x: Number(event.target.value) })}
-                      />
-                      <strong>{Math.round(exportOptions.focus_x)}%</strong>
-                    </label>
-                  )}
-                </>
-              )}
             </div>
             <div className="export-option-section">
               <div className="export-option-head">
@@ -2306,75 +2274,6 @@ function ClipWorkspace({
                   <option value="lower_third">中下安全区</option>
                 </select>
               </label>
-            </div>
-            <div className="export-option-section">
-              <div className="export-option-head">
-                <h4>品牌 Logo</h4>
-                <strong>{selectedBrandLogo ? "已启用" : "未启用"}</strong>
-              </div>
-              <div className="export-brand-row">
-                <div className="brand-logo-preview">
-                  {latestBrandLogo?.url ? <img src={latestBrandLogo.url} alt="品牌 Logo" /> : <span>LOGO</span>}
-                </div>
-                <div className="export-brand-controls">
-                  <button className="logo-upload-button" type="button" disabled={uploadingLogo || rendering} onClick={() => logoInputRef.current?.click()}>
-                    {uploadingLogo ? <SpinnerGap size={16} className="spin" /> : <UploadSimple size={16} />}
-                    {uploadingLogo ? "上传中" : latestBrandLogo ? "替换 Logo" : "上传 Logo"}
-                  </button>
-                  <input ref={logoInputRef} hidden type="file" accept="image/png,image/jpeg,image/webp" disabled={uploadingLogo || rendering} onChange={uploadBrandLogo} />
-                  <label className="export-toggle">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(exportOptions.logo_asset_id)}
-                      disabled={!latestBrandLogo || uploadingLogo}
-                      onChange={(event) => setExportOptions({ ...exportOptions, logo_asset_id: event.target.checked ? latestBrandLogo?.id ?? null : null })}
-                    />
-                    叠加到成片
-                  </label>
-                  <label className="export-select-field compact">
-                    位置
-                    <select
-                      value={exportOptions.logo_position}
-                      disabled={!exportOptions.logo_asset_id}
-                      onChange={(event) => setExportOptions({ ...exportOptions, logo_position: event.target.value as ClipRenderOptions["logo_position"] })}
-                    >
-                      <option value="top_right">右上</option>
-                      <option value="top_left">左上</option>
-                      <option value="bottom_right">右下</option>
-                      <option value="bottom_left">左下</option>
-                    </select>
-                  </label>
-                </div>
-              </div>
-            </div>
-            <div className="export-scope-grid" aria-label="导出范围">
-              {EXPORT_SCOPE_PRESETS.map((preset) => {
-                const count = preset.value === "approved" ? approvedClipMarks.length : clipMarks.length;
-                return (
-                  <button
-                    className={`export-scope-choice ${exportOptions.clip_status_filter === preset.value ? "active" : ""}`}
-                    key={preset.value}
-                    type="button"
-                    onClick={() => setExportOptions({ ...exportOptions, clip_status_filter: preset.value })}
-                  >
-                    {preset.label}
-                    <span>{preset.value === "approved" ? `${count} 段已确认` : `${count} 段当前序列`}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="export-version-grid" aria-label="导出版本">
-              {EXPORT_VERSION_PRESETS.map((preset) => (
-                <button
-                  className={`export-version-choice ${exportOptions.target_duration_seconds === preset.target ? "active" : ""}`}
-                  key={preset.target}
-                  type="button"
-                  onClick={() => setExportOptions({ ...exportOptions, target_duration_seconds: preset.target })}
-                >
-                  {preset.label}
-                  <span>{preset.detail}</span>
-                </button>
-              ))}
             </div>
             <div className="export-save-grid">
               <button
@@ -2420,7 +2319,91 @@ function ClipWorkspace({
                 placeholder={video ? defaultExportFilename(video.title) : "clip-sequence.mp4"}
               />
             </label>
-            <ExportPreflightPanel actions={preflightActions} checks={exportPreflightChecks} />
+            <div className="export-ready-summary">
+              <ExportPreflightSummary checks={exportPreflightChecks} />
+              <span>{exportBlockers.length ? "需要先处理阻塞项。" : "设置完成，可以直接导出。"}</span>
+            </div>
+            <details className="export-advanced-settings">
+              <summary>
+                <span>
+                  <strong>高级设置与导出检查</strong>
+                  <small>裁切、Logo、范围、时长版本和完整预检</small>
+                </span>
+                <CaretDown size={16} />
+              </summary>
+              <div className="export-advanced-content">
+                {exportOptions.output_profile !== "source" && (
+                  <div className="export-option-section">
+                    <div className="export-option-head">
+                      <h4>画面适配</h4>
+                      <strong>{exportOptions.fit_mode === "crop" ? "裁切填满" : "完整画面"}</strong>
+                    </div>
+                    <div className="export-fit-grid" aria-label="画面适配">
+                      {FIT_MODE_PRESETS.map((preset) => (
+                        <button
+                          className={`export-fit-choice ${exportOptions.fit_mode === preset.value ? "active" : ""}`}
+                          key={preset.value}
+                          type="button"
+                          onClick={() => setExportOptions({ ...exportOptions, fit_mode: preset.value })}
+                        >
+                          {preset.label}
+                          <span>{preset.detail}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {exportOptions.fit_mode === "crop" && (
+                      <label className="export-focus-control">
+                        <span>主体横向位置</span>
+                        <input aria-label="主体横向位置" type="range" min="0" max="100" step="1" value={exportOptions.focus_x} onChange={(event) => setExportOptions({ ...exportOptions, focus_x: Number(event.target.value) })} />
+                        <strong>{Math.round(exportOptions.focus_x)}%</strong>
+                      </label>
+                    )}
+                  </div>
+                )}
+                <div className="export-option-section">
+                  <div className="export-option-head">
+                    <h4>品牌 Logo</h4>
+                    <strong>{selectedBrandLogo ? "已启用" : "未启用"}</strong>
+                  </div>
+                  <div className="export-brand-row">
+                    <div className="brand-logo-preview">{latestBrandLogo?.url ? <img src={latestBrandLogo.url} alt="品牌 Logo" /> : <span>LOGO</span>}</div>
+                    <div className="export-brand-controls">
+                      <button className="logo-upload-button" type="button" disabled={uploadingLogo || rendering} onClick={() => logoInputRef.current?.click()}>
+                        {uploadingLogo ? <SpinnerGap size={16} className="spin" /> : <UploadSimple size={16} />}
+                        {uploadingLogo ? "上传中" : latestBrandLogo ? "替换 Logo" : "上传 Logo"}
+                      </button>
+                      <input ref={logoInputRef} hidden type="file" accept="image/png,image/jpeg,image/webp" disabled={uploadingLogo || rendering} onChange={uploadBrandLogo} />
+                      <label className="export-toggle">
+                        <input type="checkbox" checked={Boolean(exportOptions.logo_asset_id)} disabled={!latestBrandLogo || uploadingLogo} onChange={(event) => setExportOptions({ ...exportOptions, logo_asset_id: event.target.checked ? latestBrandLogo?.id ?? null : null })} />
+                        叠加到成片
+                      </label>
+                      <label className="export-select-field compact">
+                        位置
+                        <select value={exportOptions.logo_position} disabled={!exportOptions.logo_asset_id} onChange={(event) => setExportOptions({ ...exportOptions, logo_position: event.target.value as ClipRenderOptions["logo_position"] })}>
+                          <option value="top_right">右上</option>
+                          <option value="top_left">左上</option>
+                          <option value="bottom_right">右下</option>
+                          <option value="bottom_left">左下</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                <div className="export-option-section">
+                  <div className="export-option-head"><h4>导出范围</h4></div>
+                  <div className="export-scope-grid" aria-label="导出范围">
+                    {EXPORT_SCOPE_PRESETS.map((preset) => {
+                      const count = preset.value === "approved" ? approvedClipMarks.length : clipMarks.length;
+                      return <button className={`export-scope-choice ${exportOptions.clip_status_filter === preset.value ? "active" : ""}`} key={preset.value} type="button" onClick={() => setExportOptions({ ...exportOptions, clip_status_filter: preset.value })}>{preset.label}<span>{preset.value === "approved" ? `${count} 段已确认` : `${count} 段当前序列`}</span></button>;
+                    })}
+                  </div>
+                  <div className="export-version-grid" aria-label="导出版本">
+                    {EXPORT_VERSION_PRESETS.map((preset) => <button className={`export-version-choice ${exportOptions.target_duration_seconds === preset.target ? "active" : ""}`} key={preset.target} type="button" onClick={() => setExportOptions({ ...exportOptions, target_duration_seconds: preset.target })}>{preset.label}<span>{preset.detail}</span></button>)}
+                  </div>
+                </div>
+                <ExportPreflightPanel actions={preflightActions} checks={exportPreflightChecks} />
+              </div>
+            </details>
             <div className="export-modal-actions">
               <button type="button" onClick={() => setExportDialogOpen(false)} disabled={rendering}>
                 取消

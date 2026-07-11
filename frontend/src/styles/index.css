@@ -4719,6 +4719,75 @@ label textarea:focus,
   gap: 7px;
 }
 
+.export-ready-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  border: 1px solid #dbe4ef;
+  border-radius: var(--radius);
+  background: #f8fafc;
+  padding: 8px 10px;
+}
+
+.export-ready-summary > span:last-child {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.export-advanced-settings {
+  border: 1px solid #dbe4ef;
+  border-radius: var(--radius);
+  background: #ffffff;
+}
+
+.export-advanced-settings > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 9px 11px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.export-advanced-settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.export-advanced-settings > summary > span {
+  display: grid;
+  gap: 2px;
+}
+
+.export-advanced-settings > summary strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.export-advanced-settings > summary small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.export-advanced-settings > summary svg {
+  flex: 0 0 auto;
+  transition: transform 160ms ease;
+}
+
+.export-advanced-settings[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.export-advanced-content {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding: 0 11px 11px;
+}
+
 .export-preflight-panel {
   display: grid;
   gap: 10px;
@@ -5291,6 +5360,11 @@ label textarea:focus,
 
   .export-preflight-list {
     grid-template-columns: 1fr;
+  }
+
+  .export-ready-summary {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .export-modal-head,
