@@ -1,4 +1,4 @@
-import type { AutomationResult, ClipMark, ClipPayload, DailyReport, DashboardData, Job, Person, SystemStatus, Video, VideoDetail, VideoStatus } from "../types";
+import type { AutomationResult, ClipMark, ClipPayload, ClipRenderOptions, DailyReport, DashboardData, Job, MediaAsset, Person, SystemStatus, Video, VideoDetail, VideoStatus } from "../types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -50,8 +50,13 @@ export const api = {
   reprocessSubtitles: (id: number) =>
     request<Job & { job_id: number; video_id: number }>(`/api/items/${id}/reprocess-subtitles`, { method: "POST" }),
   clipPayload: (id: number) => request<ClipPayload>(`/api/items/${id}/clip`),
-  renderClips: (id: number, payload: { destination: string; output_dir?: string; filename?: string; target_duration_seconds?: number; clip_status_filter?: string }) =>
+  renderClips: (id: number, payload: ClipRenderOptions) =>
     request<Job>(`/api/items/${id}/render-clips`, { method: "POST", body: JSON.stringify(payload) }),
+  uploadBrandLogo: (id: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<MediaAsset>(`/api/items/${id}/brand-logo`, { method: "POST", body: form });
+  },
   deleteClip: (id: number) => request<{ message: string }>(`/api/clip-marks/${id}`, { method: "DELETE" }),
   updateClip: (id: number, payload: Pick<ClipMark, "start_seconds" | "end_seconds" | "label" | "note" | "quote" | "status">) =>
     request<ClipMark>(`/api/clip-marks/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),

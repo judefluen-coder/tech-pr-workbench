@@ -5,6 +5,7 @@ from pathlib import Path
 from app.clip_export import render_clip_marks
 from app.db import get_connection, now_iso
 from app.jobs import enqueue_job, fail_job, update_job
+from app.render_options import normalize_render_options
 
 
 def create_render_clips_job(video_id: int, options: dict) -> dict:
@@ -12,6 +13,7 @@ def create_render_clips_job(video_id: int, options: dict) -> dict:
         video = conn.execute("SELECT id FROM videos WHERE id = ?", (video_id,)).fetchone()
     if not video:
         raise ValueError("视频不存在。")
+    render_options = normalize_render_options(options)
     payload = {
         "video_id": video_id,
         "destination": options.get("destination") or "downloads",
@@ -19,6 +21,7 @@ def create_render_clips_job(video_id: int, options: dict) -> dict:
         "filename": options.get("filename") or "",
         "target_duration_seconds": float(options.get("target_duration_seconds") or 0),
         "clip_status_filter": options.get("clip_status_filter") or "all",
+        **render_options,
     }
     return enqueue_job("render_clips", payload, "已加入视频导出队列", dedupe_video_id=video_id)
 
@@ -34,6 +37,13 @@ def run_render_clips_job(job_id: int, payload: dict) -> None:
             filename=str(payload.get("filename") or ""),
             target_duration_seconds=float(payload.get("target_duration_seconds") or 0),
             clip_status_filter=str(payload.get("clip_status_filter") or "all"),
+            output_profile=str(payload.get("output_profile") or "source"),
+            fit_mode=str(payload.get("fit_mode") or "crop"),
+            focus_x=float(payload.get("focus_x") or 0),
+            subtitle_style=str(payload.get("subtitle_style") or "standard"),
+            subtitle_position=str(payload.get("subtitle_position") or "bottom"),
+            logo_asset_id=int(payload["logo_asset_id"]) if payload.get("logo_asset_id") else None,
+            logo_position=str(payload.get("logo_position") or "top_right"),
             progress_callback=lambda progress, message: update_job(job_id, "running", message, progress=progress),
         )
         persist_exported_sequence_asset(video_id, result)

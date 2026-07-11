@@ -27,10 +27,10 @@ Authentication, billing, real-time collaboration, multi-track editing, complex t
    - Restore interrupted worker jobs after service restarts and hydrate active jobs after browser refresh.
    - Added progress, retry, duplicate-job protection, one-command native startup, and Docker Compose configuration.
 
-3. **Publish-ready rough cuts** — Planned
-   - Add 16:9 and 9:16 output profiles.
-   - Add basic crop/fill controls, subtitle templates, and logo overlay.
-   - Validate output dimensions and subtitle placement before rendering.
+3. **Publish-ready rough cuts** — Complete
+   - Added source, 1920×1080 landscape, and 1080×1920 portrait output profiles.
+   - Added crop/contain framing, horizontal subject focus, subtitle templates and safe zones, and uploaded Logo overlays.
+   - Validate all render options before queuing and verify output dimensions, burned subtitles, and Logo pixels in integration tests.
 
 4. **Focused web workflow** — Planned
    - Separate discovery, task status, and the clip editor into focused views.

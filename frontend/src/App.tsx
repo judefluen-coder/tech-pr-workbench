@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, SyntheticEvent } from "react";
+import type { ChangeEvent, CSSProperties, DragEvent, FormEvent, KeyboardEvent, SyntheticEvent } from "react";
 import {
   ArrowCounterClockwise,
   ArrowSquareOut,
@@ -24,6 +24,7 @@ import {
   SpinnerGap,
   Subtitles,
   Trash,
+  UploadSimple,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
@@ -37,7 +38,7 @@ import { resolveClipEditShortcut } from "./lib/clipShortcuts";
 import { buildManualClipValidation, type ManualClipValidation } from "./lib/clipValidation";
 import { formatDate, formatDuration, formatNumber, formatTimecode, statusLabel } from "./lib/format";
 import { buildJobState, isActiveJobStatus, jobResult, jobVideoId } from "./lib/jobState";
-import type { ClipMark, ClipPayload, ClipRenderResult, DailyReport, Job, MediaAsset, SourceRun, Transcript, Video } from "./types";
+import type { ClipMark, ClipPayload, ClipRenderOptions, ClipRenderResult, DailyReport, Job, MediaAsset, SourceRun, Transcript, Video } from "./types";
 
 const VIDEO_PROCESSING_STATUSES = new Set(["downloading", "subtitle_fetching", "transcribing", "translating"]);
 const EXPORT_VERSION_PRESETS = [
@@ -50,6 +51,21 @@ const EXPORT_SCOPE_PRESETS = [
   { label: "全部序列", value: "all" },
   { label: "仅已确认", value: "approved" },
 ];
+const OUTPUT_PROFILE_PRESETS = [
+  { label: "横版 16:9", detail: "1920 × 1080", value: "landscape" },
+  { label: "竖版 9:16", detail: "1080 × 1920", value: "portrait" },
+  { label: "保持原尺寸", detail: "不改变画幅", value: "source" },
+] as const;
+const FIT_MODE_PRESETS = [
+  { label: "裁切填满", detail: "铺满画面", value: "crop" },
+  { label: "完整画面", detail: "留黑边适配", value: "contain" },
+] as const;
+const SUBTITLE_STYLE_PRESETS = [
+  { label: "标准", detail: "深色底", value: "standard" },
+  { label: "醒目", detail: "加粗强调", value: "bold" },
+  { label: "极简", detail: "描边无底", value: "minimal" },
+  { label: "关闭", detail: "不烧录", value: "none" },
+] as const;
 const CLIP_REVIEW_STATUSES = [
   { value: "draft", label: "待审", detail: "需要复核" },
   { value: "ready", label: "可用", detail: "可导出" },
@@ -617,6 +633,7 @@ function ClipWorkspace({
 }) {
   const video = clip?.video ?? selectedVideo;
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
   const activeCaptionRef = useRef<HTMLButtonElement | null>(null);
   const [form, setForm] = useState({ start_seconds: "0", end_seconds: "15", label: "PR 短切片段", note: "", quote: "" });
   const [currentTime, setCurrentTime] = useState(0);
@@ -627,7 +644,9 @@ function ClipWorkspace({
   const [savingClip, setSavingClip] = useState(false);
   const [renderResult, setRenderResult] = useState<ClipRenderResult | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [exportOptions, setExportOptions] = useState({ destination: "downloads", output_dir: "", filename: "", target_duration_seconds: 0, clip_status_filter: "all" });
+  const [exportOptions, setExportOptions] = useState<ClipRenderOptions>(() => defaultClipExportOptions(""));
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadedLogo, setUploadedLogo] = useState<MediaAsset | null>(null);
   const [transcriptSearch, setTranscriptSearch] = useState("");
   const [transcriptSelection, setTranscriptSelection] = useState<TranscriptSelection | null>(null);
   const [recentlyDeletedClip, setRecentlyDeletedClip] = useState<RecentlyDeletedClip | null>(null);
@@ -644,6 +663,12 @@ function ClipWorkspace({
   const visibleTranscriptRows = useMemo(() => filterTranscriptRows(rows, transcriptSearch), [rows, transcriptSearch]);
   const selectedTranscriptRange = useMemo(() => buildTranscriptSelectionSummary(rows, transcriptSelection), [rows, transcriptSelection]);
   const clipMarks = clip?.clip_marks ?? [];
+  const latestBrandLogo = uploadedLogo ?? (clip?.media_assets ?? []).find((asset) => asset.kind === "brand_logo") ?? null;
+  const selectedBrandLogo = exportOptions.logo_asset_id
+    ? uploadedLogo?.id === exportOptions.logo_asset_id
+      ? uploadedLogo
+      : (clip?.media_assets ?? []).find((asset) => asset.id === exportOptions.logo_asset_id && asset.kind === "brand_logo") ?? null
+    : null;
   const lastTranscriptEnd = rows.length ? rows[rows.length - 1].end : 0;
   const lastClipEnd = clipMarks.length ? Math.max(...clipMarks.map((mark) => mark.end_seconds)) : 0;
   const timelineDuration = Math.max(mediaDuration, video?.duration_seconds || 0, lastTranscriptEnd, lastClipEnd, Number(form.end_seconds) || 0, 1);
@@ -689,6 +714,8 @@ function ClipWorkspace({
     setReviewingClipId(null);
     setRenderResult(null);
     setQueueingRender(false);
+    setUploadingLogo(false);
+    setUploadedLogo(null);
     setSavingClip(false);
     setUpdatingClipId(null);
     setReorderingClipId(null);
@@ -699,7 +726,7 @@ function ClipWorkspace({
     setRestoringDeletedClip(false);
     setBulkUpdatingStatus(null);
     setSequenceFocusRequest(null);
-    setExportOptions({ destination: "downloads", output_dir: "", filename: video?.title ? defaultExportFilename(video.title) : "", target_duration_seconds: 0, clip_status_filter: "all" });
+    setExportOptions(defaultClipExportOptions(video?.title ?? ""));
   }, [video?.id]);
 
   useEffect(() => {
@@ -772,6 +799,14 @@ function ClipWorkspace({
     clipStatusFilter: exportOptions.clip_status_filter,
     missingCopyCount: exportCopyableClipCount,
     targetDuration: exportOptions.target_duration_seconds,
+    fitMode: exportOptions.fit_mode,
+    focusX: exportOptions.focus_x,
+    logoAsset: selectedBrandLogo,
+    logoAssetId: exportOptions.logo_asset_id,
+    logoPosition: exportOptions.logo_position,
+    outputProfile: exportOptions.output_profile,
+    subtitlePosition: exportOptions.subtitle_position,
+    subtitleStyle: exportOptions.subtitle_style,
   });
   const exportBlockers = exportPreflightChecks.filter((check) => check.severity === "block");
   const addableSuggestionCount = suggestions.filter(
@@ -1329,6 +1364,25 @@ function ClipWorkspace({
     await reorderClipSequence(nextMarks.map((mark) => mark.id), clipMarkId);
   };
 
+  const uploadBrandLogo = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!video || !file) return;
+    setUploadingLogo(true);
+    try {
+      const asset = await api.uploadBrandLogo(video.id, file);
+      setUploadedLogo(asset);
+      setExportOptions((current) => ({ ...current, logo_asset_id: asset.id }));
+      onToast("品牌 Logo 已上传并加入当前导出。");
+      onRefresh();
+    } catch (error) {
+      onToast(readError(error, "Logo 上传失败"));
+    } finally {
+      setUploadingLogo(false);
+      input.value = "";
+    }
+  };
+
   const renderSavedClips = async () => {
     if (!video || !clipMarks.length) return;
     if (exportBlockers.length) {
@@ -1539,7 +1593,7 @@ function ClipWorkspace({
   ];
 
   return (
-    <section id="clip-workspace" className="clip-workspace">
+    <section id="clip-workspace" className={`clip-workspace ${exportDialogOpen ? "export-open" : ""}`}>
       <div className="clip-heading">
         <div>
           <h2>剪辑工作台</h2>
@@ -1895,6 +1949,127 @@ function ClipWorkspace({
               <button className="ghost-action" type="button" onClick={() => setExportDialogOpen(false)} disabled={rendering}>
                 取消
               </button>
+            </div>
+            <div className="export-option-section">
+              <div className="export-option-head">
+                <h4>成片规格</h4>
+                <strong>{outputProfileLabel(exportOptions.output_profile)}</strong>
+              </div>
+              <div className="export-profile-grid" aria-label="成片规格">
+                {OUTPUT_PROFILE_PRESETS.map((preset) => (
+                  <button
+                    className={`export-profile-choice ${exportOptions.output_profile === preset.value ? "active" : ""}`}
+                    key={preset.value}
+                    type="button"
+                    onClick={() => setExportOptions({ ...exportOptions, output_profile: preset.value })}
+                  >
+                    {preset.label}
+                    <span>{preset.detail}</span>
+                  </button>
+                ))}
+              </div>
+              {exportOptions.output_profile !== "source" && (
+                <>
+                  <div className="export-fit-grid" aria-label="画面适配">
+                    {FIT_MODE_PRESETS.map((preset) => (
+                      <button
+                        className={`export-fit-choice ${exportOptions.fit_mode === preset.value ? "active" : ""}`}
+                        key={preset.value}
+                        type="button"
+                        onClick={() => setExportOptions({ ...exportOptions, fit_mode: preset.value })}
+                      >
+                        {preset.label}
+                        <span>{preset.detail}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {exportOptions.fit_mode === "crop" && (
+                    <label className="export-focus-control">
+                      <span>主体横向位置</span>
+                      <input
+                        aria-label="主体横向位置"
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={exportOptions.focus_x}
+                        onChange={(event) => setExportOptions({ ...exportOptions, focus_x: Number(event.target.value) })}
+                      />
+                      <strong>{Math.round(exportOptions.focus_x)}%</strong>
+                    </label>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="export-option-section">
+              <div className="export-option-head">
+                <h4>中文字幕</h4>
+                <strong>{subtitlePositionLabel(exportOptions.subtitle_position)}</strong>
+              </div>
+              <div className="export-subtitle-grid" aria-label="字幕模板">
+                {SUBTITLE_STYLE_PRESETS.map((preset) => (
+                  <button
+                    className={`export-subtitle-choice ${exportOptions.subtitle_style === preset.value ? "active" : ""}`}
+                    key={preset.value}
+                    type="button"
+                    onClick={() => setExportOptions({ ...exportOptions, subtitle_style: preset.value })}
+                  >
+                    {preset.label}
+                    <span>{preset.detail}</span>
+                  </button>
+                ))}
+              </div>
+              <label className="export-select-field">
+                字幕位置
+                <select
+                  value={exportOptions.subtitle_position}
+                  disabled={exportOptions.subtitle_style === "none"}
+                  onChange={(event) => setExportOptions({ ...exportOptions, subtitle_position: event.target.value as ClipRenderOptions["subtitle_position"] })}
+                >
+                  <option value="bottom">底部安全区</option>
+                  <option value="lower_third">中下安全区</option>
+                </select>
+              </label>
+            </div>
+            <div className="export-option-section">
+              <div className="export-option-head">
+                <h4>品牌 Logo</h4>
+                <strong>{selectedBrandLogo ? "已启用" : "未启用"}</strong>
+              </div>
+              <div className="export-brand-row">
+                <div className="brand-logo-preview">
+                  {latestBrandLogo?.url ? <img src={latestBrandLogo.url} alt="品牌 Logo" /> : <span>LOGO</span>}
+                </div>
+                <div className="export-brand-controls">
+                  <button className="logo-upload-button" type="button" disabled={uploadingLogo || rendering} onClick={() => logoInputRef.current?.click()}>
+                    {uploadingLogo ? <SpinnerGap size={16} className="spin" /> : <UploadSimple size={16} />}
+                    {uploadingLogo ? "上传中" : latestBrandLogo ? "替换 Logo" : "上传 Logo"}
+                  </button>
+                  <input ref={logoInputRef} hidden type="file" accept="image/png,image/jpeg,image/webp" disabled={uploadingLogo || rendering} onChange={uploadBrandLogo} />
+                  <label className="export-toggle">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(exportOptions.logo_asset_id)}
+                      disabled={!latestBrandLogo || uploadingLogo}
+                      onChange={(event) => setExportOptions({ ...exportOptions, logo_asset_id: event.target.checked ? latestBrandLogo?.id ?? null : null })}
+                    />
+                    叠加到成片
+                  </label>
+                  <label className="export-select-field compact">
+                    位置
+                    <select
+                      value={exportOptions.logo_position}
+                      disabled={!exportOptions.logo_asset_id}
+                      onChange={(event) => setExportOptions({ ...exportOptions, logo_position: event.target.value as ClipRenderOptions["logo_position"] })}
+                    >
+                      <option value="top_right">右上</option>
+                      <option value="top_left">左上</option>
+                      <option value="bottom_right">右下</option>
+                      <option value="bottom_left">左下</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
             </div>
             <div className="export-scope-grid" aria-label="导出范围">
               {EXPORT_SCOPE_PRESETS.map((preset) => {
@@ -3954,6 +4129,42 @@ function buildStats(items: Video[]) {
   };
 }
 
+function defaultClipExportOptions(title: string): ClipRenderOptions {
+  return {
+    destination: "downloads",
+    output_dir: "",
+    filename: title ? defaultExportFilename(title) : "",
+    target_duration_seconds: 0,
+    clip_status_filter: "all",
+    output_profile: "landscape",
+    fit_mode: "crop",
+    focus_x: 50,
+    subtitle_style: "standard",
+    subtitle_position: "bottom",
+    logo_asset_id: null,
+    logo_position: "top_right",
+  };
+}
+
+function outputProfileLabel(profile: ClipRenderOptions["output_profile"]): string {
+  if (profile === "portrait") return "1080 × 1920";
+  if (profile === "landscape") return "1920 × 1080";
+  return "原尺寸";
+}
+
+function subtitlePositionLabel(position: ClipRenderOptions["subtitle_position"]): string {
+  return position === "lower_third" ? "中下安全区" : "底部安全区";
+}
+
+function logoPositionLabel(position: ClipRenderOptions["logo_position"]): string {
+  return {
+    top_left: "左上",
+    top_right: "右上",
+    bottom_left: "左下",
+    bottom_right: "右下",
+  }[position];
+}
+
 function defaultExportFilename(title: string): string {
   const cleaned = title.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 48) || "clip-sequence";
   return `${cleaned}-剪辑序列.mp4`;
@@ -4020,23 +4231,39 @@ function buildExportPreflightChecks({
   clipStatusFilter,
   destination,
   filename,
+  fitMode,
+  focusX,
   hasMedia,
+  logoAsset,
+  logoAssetId,
+  logoPosition,
   marks,
   missingCopyCount,
   outputDir,
+  outputProfile,
   rowsCount,
   sequenceDuration,
+  subtitlePosition,
+  subtitleStyle,
   targetDuration,
 }: {
   clipStatusFilter: string;
   destination: string;
   filename: string;
+  fitMode: ClipRenderOptions["fit_mode"];
+  focusX: number;
   hasMedia: boolean;
+  logoAsset: MediaAsset | null;
+  logoAssetId: number | null;
+  logoPosition: ClipRenderOptions["logo_position"];
   marks: ClipMark[];
   missingCopyCount: number;
   outputDir: string;
+  outputProfile: ClipRenderOptions["output_profile"];
   rowsCount: number;
   sequenceDuration: number;
+  subtitlePosition: ClipRenderOptions["subtitle_position"];
+  subtitleStyle: ClipRenderOptions["subtitle_style"];
   targetDuration: number;
 }): ExportPreflightCheck[] {
   const invalidMarks = marks.filter((mark) => mark.end_seconds <= mark.start_seconds);
@@ -4047,6 +4274,9 @@ function buildExportPreflightChecks({
   const approvedOnly = clipStatusFilter === "approved";
   const destinationLabel = destination === "desktop" ? "桌面" : destination === "custom" ? "自定义路径" : "下载文件夹";
   const lengthWarning = marks.length > 0 && (sequenceDuration < 10 || sequenceDuration > 180);
+  const profileLabel = outputProfile === "source" ? "保持原视频尺寸" : `${outputProfile === "portrait" ? "竖版 9:16" : "横版 16:9"} · ${outputProfileLabel(outputProfile)}`;
+  const framingLabel = outputProfile === "source" ? "不改变画幅" : fitMode === "crop" ? `裁切填满 · 主体 ${Math.round(focusX)}%` : "完整画面 · 黑边适配";
+  const logoBottomConflict = Boolean(logoAssetId) && logoPosition.startsWith("bottom") && subtitleStyle !== "none";
 
   return [
     {
@@ -4064,6 +4294,18 @@ function buildExportPreflightChecks({
           ? "还没有已确认片段，先审片确认后再导出交付版。"
           : "还没有片段，先从字幕或高光加入序列。",
       severity: marks.length ? "ready" : "block",
+    },
+    {
+      id: "output-profile",
+      label: "输出规格",
+      message: profileLabel,
+      severity: "ready",
+    },
+    {
+      id: "framing",
+      label: "画面适配",
+      message: framingLabel,
+      severity: "ready",
     },
     {
       id: "boundaries",
@@ -4096,9 +4338,24 @@ function buildExportPreflightChecks({
     buildExportVersionPreflightCheck({ marks, sequenceDuration, targetDuration }),
     {
       id: "subtitles",
-      label: "字幕参考",
-      message: rowsCount ? `${rowsCount} 段字幕可用于复核成片节奏。` : "没有字幕参考，仍可导出但复核成本更高。",
-      severity: rowsCount ? "ready" : "warn",
+      label: "字幕安全区",
+      message:
+        subtitleStyle === "none"
+          ? "当前版本不烧录字幕。"
+          : rowsCount
+            ? `${rowsCount} 段字幕将使用${subtitleStyle === "bold" ? "醒目" : subtitleStyle === "minimal" ? "极简" : "标准"}模板，位于${subtitlePositionLabel(subtitlePosition)}。`
+            : "没有中文字幕可烧录，仍可导出无字幕版本。",
+      severity: subtitleStyle === "none" || !rowsCount ? "warn" : "ready",
+    },
+    {
+      id: "logo",
+      label: "品牌 Logo",
+      message: logoAssetId
+        ? logoAsset
+          ? `${logoAsset.original_filename || "品牌 Logo"} · ${logoPositionLabel(logoPosition)}${logoBottomConflict ? "，可能与字幕区域接近。" : "。"}`
+          : "选择的 Logo 素材已不存在，请重新上传或关闭 Logo。"
+        : "当前版本不叠加 Logo。",
+      severity: logoAssetId && !logoAsset ? "block" : logoBottomConflict ? "warn" : "ready",
     },
     {
       id: "clip-length",

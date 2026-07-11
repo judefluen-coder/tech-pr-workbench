@@ -155,6 +155,21 @@ export interface RenderedClip {
   url: string;
 }
 
+export interface ClipRenderOptions {
+  destination: string;
+  output_dir: string;
+  filename: string;
+  target_duration_seconds: number;
+  clip_status_filter: string;
+  output_profile: "source" | "landscape" | "portrait";
+  fit_mode: "crop" | "contain";
+  focus_x: number;
+  subtitle_style: "standard" | "bold" | "minimal" | "none";
+  subtitle_position: "bottom" | "lower_third";
+  logo_asset_id: number | null;
+  logo_position: "top_left" | "top_right" | "bottom_left" | "bottom_right";
+}
+
 export interface ClipRenderResult {
   message: string;
   export_dir: string;
@@ -164,6 +179,15 @@ export interface ClipRenderResult {
   target_duration_seconds: number;
   clip_status_filter: string;
   rendered_duration_seconds: number;
+  output_profile?: ClipRenderOptions["output_profile"];
+  output_width?: number;
+  output_height?: number;
+  fit_mode?: ClipRenderOptions["fit_mode"];
+  focus_x?: number;
+  subtitle_style?: ClipRenderOptions["subtitle_style"];
+  subtitle_position?: ClipRenderOptions["subtitle_position"];
+  logo_asset_id?: number | null;
+  logo_position?: ClipRenderOptions["logo_position"];
   clips: RenderedClip[];
 }
 

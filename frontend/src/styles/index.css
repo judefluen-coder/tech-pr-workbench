@@ -619,6 +619,10 @@ a.disabled {
   margin-top: 14px;
 }
 
+.clip-workspace.export-open video {
+  visibility: hidden;
+}
+
 .render-job-progress {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 36%);
@@ -4172,6 +4176,181 @@ label textarea:focus,
   line-height: 1.5;
 }
 
+.export-option-section {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.export-option-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.export-option-head h4 {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.export-option-head strong {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.export-profile-grid,
+.export-fit-grid,
+.export-subtitle-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.export-profile-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.export-fit-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.export-subtitle-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.export-profile-choice,
+.export-fit-choice,
+.export-subtitle-choice {
+  display: grid;
+  justify-items: start;
+  min-height: 58px;
+  border-color: #ced8e6;
+  background: #ffffff;
+  padding: 9px 10px;
+  text-align: left;
+  font-weight: 850;
+}
+
+.export-profile-choice span,
+.export-fit-choice span,
+.export-subtitle-choice span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.export-profile-choice.active,
+.export-fit-choice.active,
+.export-subtitle-choice.active {
+  border-color: var(--accent);
+  background: #edf4ff;
+  color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(35, 87, 215, 0.1);
+}
+
+.export-focus-control {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.export-focus-control input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.export-focus-control strong {
+  color: var(--text);
+  text-align: right;
+}
+
+.export-select-field {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.export-select-field.compact {
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.export-brand-row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-logo-preview {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid #ced8e6;
+  border-radius: var(--radius);
+  background: #f3f6fa;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.brand-logo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.export-brand-controls {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 1fr);
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.logo-upload-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: var(--text);
+  gap: 7px;
+  padding: 0 11px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.export-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.export-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
 .export-save-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4795,8 +4974,25 @@ label textarea:focus,
 
   .export-scope-grid,
   .export-version-grid,
-  .export-save-grid {
+  .export-save-grid,
+  .export-profile-grid,
+  .export-fit-grid,
+  .export-subtitle-grid {
     grid-template-columns: 1fr;
+  }
+
+  .export-brand-row,
+  .export-brand-controls,
+  .export-focus-control,
+  .export-select-field,
+  .export-select-field.compact {
+    grid-template-columns: 1fr;
+  }
+
+  .export-version-grid,
+  .export-fit-grid,
+  .export-subtitle-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .export-preflight-list {

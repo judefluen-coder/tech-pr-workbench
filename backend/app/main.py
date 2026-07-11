@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.ai import transcribe_and_translate
 from app.automation import run_automation
+from app.branding import import_brand_logo
 from app.config import settings
 from app.daily import get_daily_report, run_daily_discovery
 from app.db import get_connection, init_db, now_iso, row_to_dict
@@ -348,6 +349,11 @@ def item_clip(video_id: int) -> dict:
         return clip_payload(video_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/items/{video_id}/brand-logo")
+async def upload_brand_logo(video_id: int, file: UploadFile = File(...)) -> dict:
+    return await import_brand_logo(video_id, file)
 
 
 @app.post("/api/items/{video_id}/render-clips")

@@ -10,6 +10,7 @@ from pathlib import Path
 from app.config import settings
 from app.db import get_connection, now_iso, row_to_dict
 from app.exports import segments_to_srt
+from app.render_options import logo_overlay_position, normalize_render_options, output_dimensions, subtitle_force_style, subtitle_margin, video_frame_filter
 
 CLIP_MARK_ORDER_SQL = "position IS NULL, position, start_seconds, id"
 
@@ -21,6 +22,13 @@ def render_clip_marks(
     filename: str = "",
     target_duration_seconds: float = 0,
     clip_status_filter: str = "all",
+    output_profile: str = "source",
+    fit_mode: str = "crop",
+    focus_x: float = 50,
+    subtitle_style: str = "standard",
+    subtitle_position: str = "bottom",
+    logo_asset_id: int | None = None,
+    logo_position: str = "top_right",
     progress_callback: Callable[[int, str], None] | None = None,
 ) -> dict:
     ffmpeg = shutil.which("ffmpeg")
@@ -29,6 +37,17 @@ def render_clip_marks(
     filters = _ffmpeg_filters(ffmpeg)
     supports_subtitles_filter = "subtitles" in filters
     supports_overlay_filter = "overlay" in filters
+    render_options = normalize_render_options(
+        {
+            "output_profile": output_profile,
+            "fit_mode": fit_mode,
+            "focus_x": focus_x,
+            "subtitle_style": subtitle_style,
+            "subtitle_position": subtitle_position,
+            "logo_asset_id": logo_asset_id,
+            "logo_position": logo_position,
+        }
+    )
 
     with get_connection() as conn:
         video = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
@@ -54,6 +73,15 @@ def render_clip_marks(
             """,
             (video_id,),
         ).fetchone()
+        logo = None
+        if render_options["logo_asset_id"]:
+            logo = conn.execute(
+                """
+                SELECT * FROM media_assets
+                WHERE id = ? AND video_id = ? AND kind = 'brand_logo' AND stored_path != ''
+                """,
+                (render_options["logo_asset_id"], video_id),
+            ).fetchone()
 
     if not marks:
         raise ValueError("还没有保存剪辑点。")
@@ -62,6 +90,8 @@ def render_clip_marks(
         raise ValueError("还没有已确认的剪辑片段。")
     if not media:
         raise FileNotFoundError("还没有本地视频文件。")
+    if render_options["logo_asset_id"] and not logo:
+        raise ValueError("选择的 Logo 素材不存在。")
 
     planned_marks = _plan_export_marks(marks, target_duration_seconds)
     if not planned_marks:
@@ -70,10 +100,16 @@ def render_clip_marks(
     source = Path(media["stored_path"])
     if not source.exists():
         raise FileNotFoundError(f"本地视频文件不存在：{source}")
+    logo_path = Path(logo["stored_path"]) if logo else None
+    if logo_path and not logo_path.exists():
+        raise FileNotFoundError(f"Logo 文件不存在：{logo_path}")
 
     output_dir = settings.export_dir / f"video-{video_id}"
     output_dir.mkdir(parents=True, exist_ok=True)
-    video_width, video_height = _probe_video_size(source)
+    source_width, source_height = _probe_video_size(source)
+    video_width, video_height = output_dimensions(render_options["output_profile"], source_width, source_height)
+    frame_filter = video_frame_filter(render_options["output_profile"], render_options["fit_mode"], render_options["focus_x"])
+    rendition_slug = _rendition_slug(render_options)
 
     exported = []
     burned_subtitle_count = 0
@@ -84,11 +120,11 @@ def render_clip_marks(
         duration = max(end - start, 0.1)
         rendered_duration_seconds += duration
         label = _slugify(mark.get("label") or f"clip-{index}")
-        output = output_dir / f"{index:02d}-{_time_slug(start)}-{_time_slug(end)}-{label}.mp4"
-        subtitle_segments = _compact_subtitle_segments(_clip_subtitle_segments(transcripts, start, end))
+        output = output_dir / f"{index:02d}-{_time_slug(start)}-{_time_slug(end)}-{label}-{rendition_slug}.mp4"
+        subtitle_segments = []
+        if render_options["subtitle_style"] != "none":
+            subtitle_segments = _compact_subtitle_segments(_clip_subtitle_segments(transcripts, start, end))
         subtitle_path = None
-        filter_complex = ""
-        overlay_inputs: list[str] = []
         subtitle_mode = "none"
         if subtitle_segments:
             subtitle_path = output_dir / f"{index:02d}-{_time_slug(start)}-{_time_slug(end)}.zh.srt"
@@ -96,13 +132,6 @@ def render_clip_marks(
             if supports_subtitles_filter:
                 subtitle_mode = "subtitles_filter"
             elif supports_overlay_filter:
-                overlay_inputs, filter_complex = _subtitle_overlay_filter(
-                    subtitle_segments,
-                    output_dir,
-                    index,
-                    video_width,
-                    video_height,
-                )
                 subtitle_mode = "image_overlay"
             else:
                 raise RuntimeError("当前 ffmpeg 缺少 subtitles/overlay 滤镜，无法烧录中文字幕。")
@@ -116,6 +145,20 @@ def render_clip_marks(
             "-i",
             str(source),
         ]
+        overlay_inputs, filter_complex = _build_filter_plan(
+            frame_filter=frame_filter,
+            logo_path=logo_path,
+            logo_position=render_options["logo_position"],
+            output_dir=output_dir,
+            output_height=video_height,
+            output_width=video_width,
+            subtitle_mode=subtitle_mode,
+            subtitle_path=subtitle_path,
+            subtitle_position=render_options["subtitle_position"],
+            subtitle_segments=subtitle_segments,
+            subtitle_style=render_options["subtitle_style"],
+            clip_index=index,
+        )
         command.extend(overlay_inputs)
         command.extend(
             [
@@ -127,8 +170,8 @@ def render_clip_marks(
         )
         if filter_complex:
             command.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a:0?"])
-        elif subtitle_path and subtitle_mode == "subtitles_filter":
-            command.extend(["-vf", _subtitle_filter(subtitle_path)])
+        else:
+            command.extend(["-map", "0:v:0", "-map", "0:a:0?"])
         if subtitle_mode != "none":
             burned_subtitle_count += 1
         command.extend(
@@ -174,8 +217,8 @@ def render_clip_marks(
             progress_callback(90, "片段已生成，正在合成最终序列")
         scope_suffix = "-approved" if _normalized_clip_status_filter(clip_status_filter) == "approved" else ""
         duration_suffix = f"-{int(target_duration_seconds)}s" if target_duration_seconds > 0 else ""
-        sequence_path = output_dir / f"sequence{scope_suffix}{duration_suffix}.mp4"
-        list_file = output_dir / f"sequence{scope_suffix}{duration_suffix}.txt"
+        sequence_path = output_dir / f"sequence-{rendition_slug}{scope_suffix}{duration_suffix}.mp4"
+        list_file = output_dir / f"sequence-{rendition_slug}{scope_suffix}{duration_suffix}.txt"
         list_file.write_text("".join(f"file '{Path(item['path']).as_posix()}'\n" for item in exported), encoding="utf-8")
         sequence_command = [
             ffmpeg,
@@ -216,6 +259,15 @@ def render_clip_marks(
         "target_duration_seconds": target_duration_seconds,
         "clip_status_filter": _normalized_clip_status_filter(clip_status_filter),
         "rendered_duration_seconds": round(rendered_duration_seconds, 3),
+        "output_profile": render_options["output_profile"],
+        "output_width": video_width,
+        "output_height": video_height,
+        "fit_mode": render_options["fit_mode"],
+        "focus_x": render_options["focus_x"],
+        "subtitle_style": render_options["subtitle_style"],
+        "subtitle_position": render_options["subtitle_position"],
+        "logo_asset_id": render_options["logo_asset_id"],
+        "logo_position": render_options["logo_position"],
         "clips": exported,
     }
 
@@ -333,30 +385,95 @@ def _compact_subtitle_segments(segments: list[dict]) -> list[dict]:
     return compacted
 
 
-def _subtitle_filter(path: Path) -> str:
-    style = "FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF,BackColour=&H80000000,BorderStyle=4,Outline=1,Shadow=0,MarginV=42"
-    return f"subtitles=filename='{_escape_filter_path(path)}':charenc=UTF-8:force_style='{style}'"
-
-
-def _subtitle_overlay_filter(segments: list[dict], output_dir: Path, clip_index: int, video_width: int, video_height: int) -> tuple[list[str], str]:
-    layer_dir = output_dir / "subtitle_layers"
-    layer_dir.mkdir(parents=True, exist_ok=True)
-    strip_height = max(132, min(240, int(video_height * 0.18)))
+def _build_filter_plan(
+    *,
+    frame_filter: str,
+    logo_path: Path | None,
+    logo_position: str,
+    output_dir: Path,
+    output_height: int,
+    output_width: int,
+    subtitle_mode: str,
+    subtitle_path: Path | None,
+    subtitle_position: str,
+    subtitle_segments: list[dict],
+    subtitle_style: str,
+    clip_index: int,
+) -> tuple[list[str], str]:
     inputs: list[str] = []
     filters: list[str] = []
-    for index, segment in enumerate(segments, start=1):
-        image_path = layer_dir / f"{clip_index:02d}-{index:03d}.png"
-        _render_subtitle_image(segment["text"], image_path, video_width, strip_height)
-        inputs.extend(["-loop", "1", "-i", str(image_path)])
-        source_label = "[0:v]" if index == 1 else f"[v{index - 1}]"
-        output_label = "[vout]" if index == len(segments) else f"[v{index}]"
-        start = max(float(segment["start_seconds"]), 0)
-        end = max(float(segment["end_seconds"]), start + 0.1)
-        filters.append(f"{source_label}[{index}:v]overlay=0:H-h:enable='between(t,{start:.3f},{end:.3f})'{output_label}")
+    current_label = "[0:v]"
+    stage = 0
+
+    def next_stage() -> str:
+        nonlocal stage
+        stage += 1
+        return f"[vstage{stage}]"
+
+    base_filters = [frame_filter] if frame_filter else []
+    if subtitle_path and subtitle_mode == "subtitles_filter":
+        base_filters.append(_subtitle_filter(subtitle_path, output_width, output_height, subtitle_style, subtitle_position))
+    if base_filters:
+        output_label = next_stage()
+        filters.append(f"{current_label}{','.join(base_filters)}{output_label}")
+        current_label = output_label
+
+    input_index = 1
+    if logo_path:
+        inputs.extend(["-loop", "1", "-i", str(logo_path)])
+        logo_label = f"[logo{clip_index}]"
+        logo_width = max(72, round(output_width * 0.14))
+        filters.append(f"[{input_index}:v]format=rgba,scale={logo_width}:-1{logo_label}")
+        input_index += 1
+        output_label = next_stage()
+        margin = max(24, round(min(output_width, output_height) * 0.035))
+        overlay_x, overlay_y = logo_overlay_position(logo_position, margin)
+        filters.append(f"{current_label}{logo_label}overlay={overlay_x}:{overlay_y}:format=auto{output_label}")
+        current_label = output_label
+
+    if subtitle_mode == "image_overlay" and subtitle_segments:
+        images, strip_height = _render_subtitle_images(subtitle_segments, output_dir, clip_index, output_width, output_height, subtitle_style)
+        overlay_y = max(0, output_height - strip_height - subtitle_margin(output_height, subtitle_position))
+        for image_path, start, end in images:
+            inputs.extend(["-loop", "1", "-i", str(image_path)])
+            output_label = next_stage()
+            filters.append(f"{current_label}[{input_index}:v]overlay=0:{overlay_y}:enable='between(t,{start:.3f},{end:.3f})'{output_label}")
+            current_label = output_label
+            input_index += 1
+
+    if current_label == "[0:v]":
+        return inputs, ""
+    filters.append(f"{current_label}null[vout]")
     return inputs, ";".join(filters)
 
 
-def _render_subtitle_image(text: str, path: Path, width: int, height: int) -> None:
+def _subtitle_filter(path: Path, width: int = 1280, height: int = 720, subtitle_style: str = "standard", subtitle_position: str = "bottom") -> str:
+    style = subtitle_force_style(width, height, subtitle_style, subtitle_position)
+    return f"subtitles=filename='{_escape_filter_path(path)}':charenc=UTF-8:force_style='{style}'"
+
+
+def _render_subtitle_images(
+    segments: list[dict],
+    output_dir: Path,
+    clip_index: int,
+    video_width: int,
+    video_height: int,
+    subtitle_style: str,
+) -> tuple[list[tuple[Path, float, float]], int]:
+    layer_dir = output_dir / "subtitle_layers"
+    layer_dir.mkdir(parents=True, exist_ok=True)
+    strip_height = max(132, min(320, int(video_height * 0.18)))
+    images: list[tuple[Path, float, float]] = []
+    for index, segment in enumerate(segments, start=1):
+        image_path = layer_dir / f"{clip_index:02d}-{index:03d}.png"
+        _render_subtitle_image(segment["text"], image_path, video_width, strip_height, subtitle_style)
+        start = max(float(segment["start_seconds"]), 0)
+        end = max(float(segment["end_seconds"]), start + 0.1)
+        images.append((image_path, start, end))
+    return images, strip_height
+
+
+def _render_subtitle_image(text: str, path: Path, width: int, height: int, subtitle_style: str = "standard") -> None:
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError as exc:
@@ -364,7 +481,10 @@ def _render_subtitle_image(text: str, path: Path, width: int, height: int) -> No
 
     image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    font = _load_subtitle_font(ImageFont, max(28, min(46, width // 48)))
+    font_size = max(28, min(58, width // 42))
+    if subtitle_style == "bold":
+        font_size = round(font_size * 1.14)
+    font = _load_subtitle_font(ImageFont, font_size)
     lines = _wrap_text(draw, text, font, width - 160, max_lines=2)
     text_box = [draw.textbbox((0, 0), line, font=font, stroke_width=2) for line in lines]
     line_height = max((box[3] - box[1] for box in text_box), default=34) + 8
@@ -372,7 +492,9 @@ def _render_subtitle_image(text: str, path: Path, width: int, height: int) -> No
     block_width = min(width - 72, max((box[2] - box[0] for box in text_box), default=0) + 56)
     x = (width - block_width) // 2
     y = max(10, height - block_height - 30)
-    draw.rounded_rectangle((x, y - 12, x + block_width, y + block_height + 10), radius=16, fill=(0, 0, 0, 150))
+    if subtitle_style != "minimal":
+        alpha = 178 if subtitle_style == "bold" else 150
+        draw.rounded_rectangle((x, y - 12, x + block_width, y + block_height + 10), radius=16, fill=(0, 0, 0, alpha))
     for line_index, line in enumerate(lines):
         box = draw.textbbox((0, 0), line, font=font, stroke_width=2)
         line_x = (width - (box[2] - box[0])) // 2
@@ -382,6 +504,8 @@ def _render_subtitle_image(text: str, path: Path, width: int, height: int) -> No
 
 def _load_subtitle_font(image_font: object, size: int):
     candidates = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
         "/System/Library/Fonts/PingFang.ttc",
         "/System/Library/Fonts/Hiragino Sans GB.ttc",
         "/System/Library/Fonts/STHeiti Medium.ttc",
@@ -474,6 +598,15 @@ def _time_slug(seconds: float) -> str:
     minutes = total // 60
     secs = total % 60
     return f"{minutes:02d}m{secs:02d}s"
+
+
+def _rendition_slug(options: dict) -> str:
+    focus = round(float(options["focus_x"]))
+    logo = f"-logo{options['logo_asset_id']}-{options['logo_position']}" if options.get("logo_asset_id") else ""
+    return (
+        f"{options['output_profile']}-{options['fit_mode']}-f{focus}-"
+        f"{options['subtitle_style']}-{options['subtitle_position']}{logo}"
+    )
 
 
 def _export_url(path: Path) -> str:

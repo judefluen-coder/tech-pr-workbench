@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -69,6 +71,13 @@ class RenderClipsRequest(BaseModel):
     filename: str = ""
     target_duration_seconds: float = Field(default=0, ge=0, le=600)
     clip_status_filter: str = Field(default="all")
+    output_profile: Literal["source", "landscape", "portrait"] = "source"
+    fit_mode: Literal["crop", "contain"] = "crop"
+    focus_x: float = Field(default=50, ge=0, le=100)
+    subtitle_style: Literal["standard", "bold", "minimal", "none"] = "standard"
+    subtitle_position: Literal["bottom", "lower_third"] = "bottom"
+    logo_asset_id: int | None = Field(default=None, gt=0)
+    logo_position: Literal["top_left", "top_right", "bottom_left", "bottom_right"] = "top_right"
 
 
 class AutomationRequest(BaseModel):

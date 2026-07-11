@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+import io
 
 import pytest
 from fastapi.testclient import TestClient
@@ -256,6 +257,13 @@ def test_render_clips_registers_exported_sequence_asset() -> None:
             """,
             (video_id, str(source), timestamp),
         )
+        conn.execute(
+            """
+            INSERT INTO transcripts (video_id, language, start_seconds, end_seconds, text, source, created_at)
+            VALUES (?, 'zh', 0.1, 0.9, '发布规格字幕测试', 'test', ?)
+            """,
+            (video_id, timestamp),
+        )
 
     clip_response = client.post(
         "/api/clip-marks",
@@ -284,10 +292,41 @@ def test_render_clips_registers_exported_sequence_asset() -> None:
     )
     assert draft_clip_response.status_code == 200
 
+    from PIL import Image
+
+    logo_bytes = io.BytesIO()
+    Image.new("RGBA", (80, 40), (240, 30, 30, 255)).save(logo_bytes, format="PNG")
+    logo_response = client.post(
+        f"/api/items/{video_id}/brand-logo",
+        files={"file": ("brand.png", logo_bytes.getvalue(), "image/png")},
+    )
+    assert logo_response.status_code == 200
+    assert logo_response.json()["kind"] == "brand_logo"
+    assert logo_response.json()["url"].startswith("/media/uploads/brand/")
+
+    invalid_profile = client.post(
+        f"/api/items/{video_id}/render-clips",
+        json={"output_profile": "square"},
+    )
+    assert invalid_profile.status_code == 422
+
     save_dir = settings.tmp_dir / "saved"
     render_response = client.post(
         f"/api/items/{video_id}/render-clips",
-        json={"destination": "custom", "output_dir": str(save_dir), "filename": "asset-test.mp4", "target_duration_seconds": 0, "clip_status_filter": "approved"},
+        json={
+            "destination": "custom",
+            "output_dir": str(save_dir),
+            "filename": "asset-test.mp4",
+            "target_duration_seconds": 0,
+            "clip_status_filter": "approved",
+            "output_profile": "portrait",
+            "fit_mode": "crop",
+            "focus_x": 65,
+            "subtitle_style": "bold",
+            "subtitle_position": "lower_third",
+            "logo_asset_id": logo_response.json()["id"],
+            "logo_position": "top_right",
+        },
     )
     assert render_response.status_code == 200
     from app.worker import run_worker_once
@@ -298,7 +337,11 @@ def test_render_clips_registers_exported_sequence_asset() -> None:
     render_payload = json.loads(processed["result"])
     assert render_payload["sequence_path"]
     assert render_payload["clip_status_filter"] == "approved"
+    assert render_payload["output_profile"] == "portrait"
+    assert (render_payload["output_width"], render_payload["output_height"]) == (1080, 1920)
+    assert render_payload["logo_asset_id"] == logo_response.json()["id"]
     assert [clip["label"] for clip in render_payload["clips"]] == ["确认导出"]
+    assert render_payload["clips"][0]["subtitle_mode"] == "burned_in"
     assert render_payload["sequence_url"].startswith("/media/exports/")
 
     clip_payload = client.get(f"/api/items/{video_id}/clip").json()
@@ -312,6 +355,38 @@ def test_render_clips_registers_exported_sequence_asset() -> None:
     video_detail = client.get(f"/api/videos/{video_id}").json()
     detail_asset = next(asset for asset in video_detail["media_assets"] if asset["kind"] == "exported_sequence")
     assert detail_asset["url"] == render_payload["sequence_url"]
+
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=s=x:p=0",
+            render_payload["sequence_path"],
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert probe.stdout.strip() == "1080x1920"
+
+    frame_path = settings.tmp_dir / "portrait-logo-frame.png"
+    subprocess.run(
+        [ffmpeg, "-y", "-ss", "0.2", "-i", render_payload["sequence_path"], "-frames:v", "1", str(frame_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    with Image.open(frame_path) as frame:
+        red, green, blue = frame.convert("RGB").getpixel((930, 60))
+    assert red > 150 and red > green * 2 and red > blue * 2
 
 
 def test_download_requires_authorization_note() -> None:
