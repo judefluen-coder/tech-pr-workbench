@@ -42,6 +42,8 @@ npm run preview:demo --prefix frontend -- --port 4173
 
 打开 `http://127.0.0.1:4173/tech-pr-workbench/`。推送到 `main` 后，`.github/workflows/pages-demo.yml` 会使用 GitHub Actions 构建并发布 Pages。
 
+发现问题或希望贡献？请先阅读[贡献说明](CONTRIBUTING.md)。
+
 ## 截图导览
 
 ### 1. AI 采访日报
