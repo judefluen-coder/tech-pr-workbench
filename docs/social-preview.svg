@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="Tech PR Workbench social preview">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0e233d"/><stop offset="1" stop-color="#143d50"/></linearGradient>
+    <pattern id="dots" width="38" height="38" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#ffffff" opacity=".11"/></pattern>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/><rect width="1280" height="640" fill="url(#dots)"/>
+  <circle cx="1116" cy="2" r="334" fill="#26a8c4" opacity=".08"/>
+  <rect x="64" y="57" width="300" height="40" rx="20" fill="#184661" stroke="#5ebbd4"/>
+  <text x="86" y="84" fill="#b4edfb" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700" letter-spacing="1">LOCAL-FIRST · TECH PR</text>
+  <text x="62" y="188" fill="#ffffff" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="52" font-weight="750">Tech PR Workbench</text>
+  <text x="64" y="252" fill="#e1f3f6" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="600">从科技访谈线索，到可复核的剪辑素材</text>
+  <text x="64" y="297" fill="#e1f3f6" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="600">一条本地优先的工作流</text>
+  <rect x="63" y="373" width="511" height="108" rx="18" fill="#193b56" stroke="#43839a"/>
+  <text x="89" y="414" fill="#bceaf4" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="600">发现公开视频 · 保留原始链接与嘉宾线索</text>
+  <text x="89" y="453" fill="#ffdfb0" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="600">中文字幕 · 选片段 · 排顺序 · 导出</text>
+  <text x="65" y="563" fill="#a2c5d3" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="18">体验版可在线打开  ·  下载与再发布需取得素材权利</text>
+
+  <rect x="650" y="92" width="568" height="447" rx="25" fill="#f6fafb"/>
+  <rect x="650" y="92" width="568" height="57" rx="25" fill="#e6eff3"/>
+  <rect x="650" y="125" width="568" height="24" fill="#e6eff3"/>
+  <circle cx="681" cy="121" r="6" fill="#f27b7b"/><circle cx="703" cy="121" r="6" fill="#f8c260"/><circle cx="725" cy="121" r="6" fill="#6bcd9f"/>
+  <text x="759" y="126" fill="#56717d" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="700">DISCOVER → REVIEW → CUT</text>
+  <rect x="682" y="177" width="503" height="87" rx="15" fill="#ffffff" stroke="#d2e2e8"/>
+  <rect x="701" y="194" width="73" height="54" rx="10" fill="#d9eff5"/>
+  <path d="m732 206 25 15-25 15z" fill="#3b97af"/>
+  <text x="791" y="208" fill="#285064" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">采访候选</text>
+  <text x="791" y="237" fill="#7a909c" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">原始链接 · 来源 · 人物</text>
+  <rect x="682" y="281" width="503" height="87" rx="15" fill="#ffffff" stroke="#d2e2e8"/>
+  <rect x="702" y="301" width="8" height="46" rx="4" fill="#6abdc6"/><rect x="717" y="314" width="8" height="33" rx="4" fill="#48a4b4"/><rect x="732" y="293" width="8" height="54" rx="4" fill="#61bed0"/><rect x="747" y="308" width="8" height="39" rx="4" fill="#378da8"/><rect x="762" y="319" width="8" height="28" rx="4" fill="#75cdd2"/>
+  <text x="791" y="313" fill="#285064" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">双语字幕</text>
+  <text x="791" y="342" fill="#7a909c" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">转写 · 翻译 · 人工复核</text>
+  <rect x="682" y="385" width="503" height="111" rx="15" fill="#ffffff" stroke="#d2e2e8"/>
+  <rect x="703" y="410" width="72" height="53" rx="8" fill="#fbe3c4"/>
+  <path d="m730 419 24 17-24 17z" fill="#db9250"/>
+  <text x="791" y="422" fill="#285064" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">授权粗剪</text>
+  <text x="791" y="451" fill="#7a909c" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">选片段 → 排顺序 → 导出成片</text>
+  <rect x="1039" y="457" width="120" height="23" rx="11" fill="#dcf3e9"/>
+  <text x="1054" y="473" fill="#268367" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="13" font-weight="700">LOCAL WORKFLOW</text>
+</svg>
